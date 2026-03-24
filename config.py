@@ -1,0 +1,71 @@
+"""
+Hyperparameter and reward configuration for the T1 bipedal locomotion project.
+"""
+
+# ── Environment ──────────────────────────────────────────────────────────────
+ENV_CONFIG = {
+    "control_freq": 240,           # PyBullet simulation frequency (Hz)
+    "policy_freq": 60,             # How often the policy acts (Hz)
+    "max_episode_steps": 1000,     # Steps per episode at policy_freq (~33 s)
+    "initial_height": 0.85,        # Base spawn height (m)
+    "fall_threshold": 0.35,        # Torso z below this → fallen (m)
+    "target_speed": 0.5,           # Desired forward speed (m/s)
+}
+
+# ── Reward weights (tunable) ─────────────────────────────────────────────────
+REWARD_WEIGHTS = {
+    "forward_velocity": 1.0,       # Reward for moving toward target speed
+    "survival": 0.5,               # Bonus each timestep for staying alive
+    "energy_penalty": -0.005,      # Penalty per unit of energy consumed
+    "fall_penalty": -10.0,         # Large penalty for falling
+    "orientation_penalty": -0.3,   # Penalty for torso tilt
+    "joint_limit_penalty": -0.1,   # Penalty for approaching joint limits
+}
+
+# ── PPO hyperparameters ──────────────────────────────────────────────────────
+PPO_CONFIG = {
+    "learning_rate": 3e-4,
+    "n_steps": 2048,
+    "batch_size": 64,
+    "n_epochs": 10,
+    "gamma": 0.99,
+    "gae_lambda": 0.95,
+    "clip_range": 0.2,
+    "ent_coef": 0.01,
+    "vf_coef": 0.5,
+    "max_grad_norm": 0.5,
+    "policy_kwargs": dict(net_arch=[256, 256]),
+    "device": "cpu",               # CPU is faster than GPU for small MLPs + PyBullet
+    "total_timesteps": 2_000_000,
+}
+
+# ── SAC hyperparameters ──────────────────────────────────────────────────────
+SAC_CONFIG = {
+    "learning_rate": 3e-4,
+    "buffer_size": 1_000_000,
+    "learning_starts": 10_000,
+    "batch_size": 256,
+    "tau": 0.005,
+    "gamma": 0.99,
+    "ent_coef": "auto",
+    "policy_kwargs": dict(net_arch=[256, 256]),
+    "device": "cpu",               # CPU is faster than GPU for small MLPs + PyBullet
+    "total_timesteps": 2_000_000,
+}
+
+# ── Actuated joints (indices into the 23-joint list) ─────────────────────────
+# We skip head joints (0, 1) as they don't contribute to locomotion.
+# Indices: Waist(10), Left leg(11-16), Right leg(17-22), Arms(2-9)
+LEG_JOINT_INDICES = [
+    10,                   # Waist
+    11, 12, 13, 14, 15, 16,  # Left leg
+    17, 18, 19, 20, 21, 22,  # Right leg
+]
+
+ARM_JOINT_INDICES = [
+    2, 3, 4, 5,    # Left arm
+    6, 7, 8, 9,    # Right arm
+]
+
+# All actuated joints (everything except head: joints 0, 1)
+ACTUATED_JOINT_INDICES = ARM_JOINT_INDICES + LEG_JOINT_INDICES
