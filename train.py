@@ -133,11 +133,11 @@ def _save_run_metadata(log_dir, algo_name, total_timesteps, reward_weights,
 
 # ── Environment factory ──────────────────────────────────────────────────────
 
-def make_env(render_mode=None, reward_weights=None):
+def make_env(render_mode=None, reward_weights=None, monitor_dir=None):
     def _init():
         e = gym.make("T1Walking-v0", render_mode=render_mode,
                       reward_weights=reward_weights)
-        e = Monitor(e)
+        e = Monitor(e, filename=os.path.join(monitor_dir, "monitor") if monitor_dir else None)
         return e
     return _init
 
@@ -145,23 +145,44 @@ def make_env(render_mode=None, reward_weights=None):
 # ── Camera follow callback ───────────────────────────────────────────────────
 
 class CameraFollowCallback(BaseCallback):
-    """Follows the robot with the PyBullet camera. No text, just camera."""
+    """Follows the robot with the PyBullet camera and handles render toggle."""
 
-    def __init__(self, verbose=0):
+    def __init__(self, render_flag_path="", verbose=0):
         super().__init__(verbose)
+        self.render_flag_path = render_flag_path
+        self._rendering = True
+        self._check_interval = 50  # check flag file every N steps
 
     def _on_step(self) -> bool:
-        try:
-            # Get the raw env from inside DummyVecEnv -> VecNormalize -> Monitor
-            raw_env = self.training_env.envs[0].unwrapped
-            if raw_env.robot is not None and raw_env.render_mode == "human":
-                pos = raw_env.robot.get_state()["base-position"]
-                pb.resetDebugVisualizerCamera(
-                    cameraDistance=3.0, cameraYaw=40.0, cameraPitch=-20.0,
-                    cameraTargetPosition=[pos[0], pos[1], 0.8],
-                    physicsClientId=raw_env.client)
-        except Exception:
-            pass
+        # Periodically check if dashboard toggled rendering off/on
+        if self.num_timesteps % self._check_interval == 0 and self.render_flag_path:
+            try:
+                with open(self.render_flag_path, "r") as f:
+                    want_render = f.read().strip() == "1"
+                if want_render != self._rendering:
+                    self._rendering = want_render
+                    raw_env = self.training_env.envs[0].unwrapped
+                    if want_render:
+                        pb.configureDebugVisualizer(pb.COV_ENABLE_RENDERING, 1,
+                                                     physicsClientId=raw_env.client)
+                    else:
+                        pb.configureDebugVisualizer(pb.COV_ENABLE_RENDERING, 0,
+                                                     physicsClientId=raw_env.client)
+            except Exception:
+                pass
+
+        # Camera follow
+        if self._rendering:
+            try:
+                raw_env = self.training_env.envs[0].unwrapped
+                if raw_env.robot is not None:
+                    pos = raw_env.robot.get_state()["base-position"]
+                    pb.resetDebugVisualizerCamera(
+                        cameraDistance=3.0, cameraYaw=40.0, cameraPitch=-20.0,
+                        cameraTargetPosition=[pos[0], pos[1], 0.8],
+                        physicsClientId=raw_env.client)
+            except Exception:
+                pass
         return True
 
 
@@ -210,9 +231,15 @@ def train(algo_name, total_timesteps, run_name, reward_weights=None,
                          else final_model_path)
         print(f"\n[Resume] Loading model from: {model_to_load}")
 
+    # Write a render flag file — dashboard can toggle this
+    render_flag_path = os.path.join(log_dir, ".render_on")
+    with open(render_flag_path, "w") as f:
+        f.write("1")
+
     # ── Create environments ──
     # Training env: GUI mode so PyBullet window stays open the whole time
-    train_env = DummyVecEnv([make_env(render_mode="human", reward_weights=rw)])
+    train_env = DummyVecEnv([make_env(render_mode="human", reward_weights=rw,
+                                       monitor_dir=log_dir)])
 
     if can_resume and os.path.exists(vecnorm_path):
         print(f"[Resume] Loading VecNormalize from: {vecnorm_path}")
@@ -224,7 +251,7 @@ def train(algo_name, total_timesteps, run_name, reward_weights=None,
                                  clip_obs=10.0)
 
     # Eval env: headless
-    eval_env = DummyVecEnv([make_env(reward_weights=rw)])
+    eval_env = DummyVecEnv([make_env(reward_weights=rw, monitor_dir=None)])
     eval_env = VecNormalize(eval_env, norm_obs=True, norm_reward=False,
                             clip_obs=10.0, training=False)
 
@@ -275,7 +302,7 @@ def train(algo_name, total_timesteps, run_name, reward_weights=None,
         log_dir=log_dir,
         algo_name=algo_name,
     )
-    camera_callback = CameraFollowCallback()
+    camera_callback = CameraFollowCallback(render_flag_path=render_flag_path)
 
     callbacks = CallbackList([
         eval_callback, checkpoint_callback, save_callback, camera_callback
