@@ -84,12 +84,12 @@ class T1WalkingEnv(gym.Env):
                                 basePosition=[0, 0, 0],
                                 physicsClientId=self.client)
 
-    def reset(self, seed=None, options=None):
-        super().reset(seed=seed)
+    def _do_reset(self):
+        """Internal reset logic, may raise if server dies."""
         self._connect()
 
         if self.robot is None:
-            # First reset: load the URDF once
+            # First reset (or after reconnect): load the URDF
             self.robot = T1(
                 basePosition=[0, 0, self.cfg["initial_height"]],
                 baseOrientation=p.getQuaternionFromEuler([0, 0, 0]),
@@ -101,24 +101,35 @@ class T1WalkingEnv(gym.Env):
             self._joint_mid = (self._joint_lower + self._joint_upper) / 2.0
             self._joint_range = (self._joint_upper - self._joint_lower) / 2.0
         else:
-            # Subsequent resets: move robot back to origin instead of reloading
+            # Subsequent resets: move robot back to origin
             self.robot.reset_base(
                 [0, 0, self.cfg["initial_height"]],
                 p.getQuaternionFromEuler([0, 0, 0]),
             )
 
-        # Reset all joints to zero
         self.robot.reset([0.0] * T1.NUM_JOINTS)
 
-        # Let the robot settle for a few sim steps
         for _ in range(50):
             p.stepSimulation(physicsClientId=self.client)
 
         self.step_count = 0
         state = self.robot.get_state()
         self.prev_x = state["base-position"][0]
+        return self._build_obs(state)
 
-        obs = self._build_obs(state)
+    def reset(self, seed=None, options=None):
+        super().reset(seed=seed)
+        for attempt in range(3):
+            try:
+                obs = self._do_reset()
+                return obs, {}
+            except Exception:
+                # Server died — force full reconnect
+                self.client = None
+                self.robot = None
+                self.plane = None
+        # If all retries fail, return zeros
+        obs = np.zeros(self.observation_space.shape, dtype=np.float32)
         return obs, {}
 
     def step(self, action):

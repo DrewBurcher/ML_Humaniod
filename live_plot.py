@@ -150,6 +150,7 @@ class Dashboard:
             eps = np.arange(1, len(r) + 1)
             ax.plot(eps, r, alpha=0.2, color="steelblue", linewidth=0.5)
             ax.plot(eps, smooth(r, w), color="steelblue", linewidth=2)
+        ax.set_xlim(left=0)
         ax.set_xlabel("Episode")
         ax.set_ylabel("Reward")
         ax.set_title("Episode Reward")
@@ -163,6 +164,7 @@ class Dashboard:
             eps = np.arange(1, len(l) + 1)
             ax.plot(eps, l, alpha=0.2, color="darkorange", linewidth=0.5)
             ax.plot(eps, smooth(l, w), color="darkorange", linewidth=2)
+        ax.set_xlim(left=0)
         ax.set_xlabel("Episode")
         ax.set_ylabel("Steps")
         ax.set_title("Episode Length (survival)")
@@ -177,6 +179,7 @@ class Dashboard:
             cum = np.cumsum(l)
             ax.plot(cum, r, alpha=0.2, color="green", linewidth=0.5)
             ax.plot(cum, smooth(r, w), color="green", linewidth=2)
+        ax.set_xlim(left=0)
         ax.set_xlabel("Total Timesteps")
         ax.set_ylabel("Reward")
         ax.set_title("Reward vs Timesteps")
@@ -201,6 +204,7 @@ class Dashboard:
         else:
             ax.text(0.5, 0.5, "Waiting for eval data...",
                     ha="center", va="center", transform=ax.transAxes)
+        ax.set_xlim(left=0)
         ax.set_xlabel("Timesteps")
         ax.set_ylabel("Mean Eval Reward")
         ax.set_title("Evaluation Performance")

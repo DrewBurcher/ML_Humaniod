@@ -43,13 +43,13 @@ PPO_CONFIG = {
 SAC_CONFIG = {
     "learning_rate": 3e-4,
     "buffer_size": 1_000_000,
-    "learning_starts": 10_000,
+    "learning_starts": 1_000,
     "batch_size": 256,
     "tau": 0.005,
     "gamma": 0.99,
     "ent_coef": "auto",
     "policy_kwargs": dict(net_arch=[256, 256]),
-    "device": "cpu",               # CPU is faster than GPU for small MLPs + PyBullet
+    "device": "cpu",
     "total_timesteps": 2_000_000,
 }
 
