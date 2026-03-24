@@ -28,7 +28,6 @@ def main():
     p_train.add_argument("--name", type=str, default=None)
     p_train.add_argument("--resume", type=str, default=None,
                           help="Run dir to resume from (e.g. runs/sac_test)")
-    p_train.add_argument("--visualize-every", type=int, default=10)
     p_train.add_argument("--no-plot", action="store_true")
 
     # ── eval ─────────────────────────────────────────────────────────────────
@@ -70,12 +69,10 @@ def main():
             import os
             run_name = os.path.basename(args.resume.rstrip("/\\"))
             train(args.algo, args.timesteps, run_name,
-                  visualize_every=args.visualize_every,
                   live_plot=not args.no_plot, resume=True)
         else:
             name = args.name or f"{args.algo}_{int(time.time())}"
             train(args.algo, args.timesteps, name,
-                  visualize_every=args.visualize_every,
                   live_plot=not args.no_plot)
 
     elif args.command == "eval":

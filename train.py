@@ -2,15 +2,15 @@
 Training script for PPO and SAC on the T1 bipedal walking environment.
 
 Features:
+    - PyBullet GUI stays open the whole time (you watch the robot learn live)
+    - Separate matplotlib dashboard shows all stats, plots, run info
     - Auto-commits to git before each run, saves commit hash in run metadata
-    - Saves all hyperparams, reward weights, env config, and run info as JSON
-    - Supports pause/resume: pass --resume runs/my_run to continue training
-    - Live matplotlib dashboard auto-launches
-    - Periodic GUI visualization of current policy
+    - Saves all hyperparams, reward weights, env config as JSON
+    - Supports pause (Ctrl+C) and resume (--resume runs/my_run)
 
 Usage:
     python train.py --algo sac --timesteps 100000 --name my_run
-    python train.py --resume runs/my_run --timesteps 50000   # add 50k more steps
+    python train.py --resume runs/my_run --algo sac --timesteps 50000
 """
 
 import argparse
@@ -64,10 +64,9 @@ def _git_info():
 def _auto_commit():
     """Auto-commit all tracked + new .py files before a training run."""
     try:
-        # Stage all Python files and config
-        subprocess.run(["git", "add", "*.py", "config.py", "requirements.txt"],
+        subprocess.run(["git", "add", "*.py", "config.py", "requirements.txt",
+                         ".gitignore"],
                        capture_output=True)
-        # Check if there's anything to commit
         result = subprocess.run(["git", "status", "--porcelain"],
                                 capture_output=True, text=True)
         if result.stdout.strip():
@@ -77,10 +76,9 @@ def _auto_commit():
                 capture_output=True, text=True
             )
             print("[Git] Auto-committed changes before training run.")
+            subprocess.run(["git", "push"], capture_output=True, text=True)
         else:
             print("[Git] Working tree clean, no commit needed.")
-        # Push
-        subprocess.run(["git", "push"], capture_output=True, text=True)
     except Exception as e:
         print(f"[Git] Warning: auto-commit failed: {e}")
 
@@ -90,11 +88,9 @@ def _save_run_metadata(log_dir, algo_name, total_timesteps, reward_weights,
     """Save all run metadata as JSON for reproducibility."""
     meta_path = os.path.join(log_dir, "run_metadata.json")
 
-    # Load existing metadata if resuming
     if os.path.exists(meta_path):
         with open(meta_path, "r") as f:
             meta = json.load(f)
-        # Append to training history
         meta.setdefault("training_history", [])
     else:
         meta = {"training_history": []}
@@ -118,7 +114,6 @@ def _save_run_metadata(log_dir, algo_name, total_timesteps, reward_weights,
 
     meta["training_history"].append(session)
 
-    # Always save current config snapshot
     algo_cfg = PPO_CONFIG.copy() if algo_name == "ppo" else SAC_CONFIG.copy()
     meta["algo_config"] = algo_cfg
     meta["algo_config"]["policy_kwargs"] = str(algo_cfg.get("policy_kwargs", {}))
@@ -136,15 +131,6 @@ def _save_run_metadata(log_dir, algo_name, total_timesteps, reward_weights,
     return meta
 
 
-def _load_run_metadata(log_dir):
-    """Load run metadata from a previous run."""
-    meta_path = os.path.join(log_dir, "run_metadata.json")
-    if os.path.exists(meta_path):
-        with open(meta_path, "r") as f:
-            return json.load(f)
-    return None
-
-
 # ── Environment factory ──────────────────────────────────────────────────────
 
 def make_env(render_mode=None, reward_weights=None):
@@ -156,133 +142,26 @@ def make_env(render_mode=None, reward_weights=None):
     return _init
 
 
-# ── GUI Visualization Callback ───────────────────────────────────────────────
+# ── Camera follow callback ───────────────────────────────────────────────────
 
-class VisualEvalCallback(BaseCallback):
-    """Opens a GUI window periodically to show episodes with debug overlay.
+class CameraFollowCallback(BaseCallback):
+    """Follows the robot with the PyBullet camera. No text, just camera."""
 
-    The window stays open for a minimum of `min_display_sec` seconds,
-    running multiple episodes if needed so you can actually see the robot.
-    """
-
-    MIN_DISPLAY_SEC = 15  # keep the GUI open for at least this many seconds
-
-    def __init__(self, eval_freq=10_000, eval_interval=10,
-                 reward_weights=None, algo_name="", run_name="",
-                 total_target_steps=0, verbose=0):
+    def __init__(self, verbose=0):
         super().__init__(verbose)
-        self.eval_freq = eval_freq
-        self.eval_interval = eval_interval
-        self.reward_weights = reward_weights
-        self.algo_name = algo_name
-        self.run_name = run_name
-        self.total_target_steps = total_target_steps
-        self._eval_count = 0
-        self._visual_count = 0
-        self._best_visual_reward = -float("inf")
-        self._start_time = time.time()
 
     def _on_step(self) -> bool:
-        if self.num_timesteps % self.eval_freq != 0:
-            return True
-        self._eval_count += 1
-        if self._eval_count % self.eval_interval != 0:
-            return True
-
-        self._visual_count += 1
-        elapsed = time.time() - self._start_time
-        steps_per_sec = self.num_timesteps / max(elapsed, 1)
-
-        print(f"\n[Visual eval #{self._visual_count}] Opening GUI "
-              f"(timestep {self.num_timesteps:,})...")
-
-        vis_env = gym.make("T1Walking-v0", render_mode="human",
-                           reward_weights=self.reward_weights)
         try:
-            raw_env = vis_env.unwrapped
-            vec_norm = self.training_env
-            debug_ids = []
-            gui_start = time.time()
-            episode_num = 0
-
-            # Run episodes until minimum display time is met
-            while (time.time() - gui_start) < self.MIN_DISPLAY_SEC:
-                episode_num += 1
-                obs, _ = vis_env.reset()
-                total_reward = 0.0
-                steps = 0
-                done = False
-                max_x = 0.0
-
-                while not done:
-                    obs_norm = vec_norm.normalize_obs(obs)
-                    action, _ = self.model.predict(obs_norm, deterministic=True)
-                    obs, reward, terminated, truncated, info = vis_env.step(action)
-                    total_reward += reward
-                    steps += 1
-                    done = terminated or truncated
-                    max_x = max(max_x, abs(info.get("x_distance", 0)))
-
-                    # Camera follow
-                    try:
-                        pos = raw_env.robot.get_state()["base-position"]
-                        pb.resetDebugVisualizerCamera(
-                            cameraDistance=3.0, cameraYaw=40.0, cameraPitch=-20.0,
-                            cameraTargetPosition=[pos[0], pos[1], 0.8],
-                            physicsClientId=raw_env.client)
-                    except Exception:
-                        pass
-
-                    # Update overlay text every 5 steps
-                    if steps % 5 == 1:
-                        try:
-                            for did in debug_ids:
-                                pb.removeUserDebugItem(did, physicsClientId=raw_env.client)
-                            debug_ids.clear()
-
-                            remaining = self.total_target_steps - self.num_timesteps
-                            eta_sec = remaining / max(steps_per_sec, 0.1)
-                            eta_str = (f"{eta_sec/3600:.1f}h" if eta_sec > 3600
-                                       else f"{eta_sec/60:.0f}m")
-                            gui_remaining = max(0, self.MIN_DISPLAY_SEC - (time.time() - gui_start))
-
-                            lines = [
-                                f"Run: {self.run_name}  |  Algo: {self.algo_name.upper()}",
-                                f"Timestep: {self.num_timesteps:,} / {self.total_target_steps:,}  ({100*self.num_timesteps/max(self.total_target_steps,1):.1f}%)",
-                                f"Speed: {steps_per_sec:.1f} steps/sec  |  ETA: {eta_str}",
-                                f"Elapsed: {elapsed/60:.1f} min  |  Evals: {self._eval_count}",
-                                f"Visual: #{self._visual_count}  (every {self.eval_interval * self.eval_freq:,} steps)",
-                                f"Best visual reward: {self._best_visual_reward:.1f}",
-                                f"",
-                                f"--- Episode {episode_num} ---",
-                                f"Step: {steps}  |  Reward: {total_reward:.1f}",
-                                f"Max |X|: {max_x:.2f} m  |  Z: {info.get('torso_z', 0):.2f} m",
-                                f"Window closes in: {gui_remaining:.0f}s",
-                            ]
-
-                            for i, line in enumerate(lines):
-                                did = pb.addUserDebugText(
-                                    line,
-                                    textPosition=[0, 0, 2.8 - i * 0.14],
-                                    textColorRGB=[1, 1, 0.3] if i < 6 else [0.8, 1, 0.8],
-                                    textSize=1.3,
-                                    lifeTime=0,
-                                    physicsClientId=raw_env.client,
-                                )
-                                debug_ids.append(did)
-                        except Exception:
-                            pass
-
-                    time.sleep(1.0 / 60)
-
-                self._best_visual_reward = max(self._best_visual_reward, total_reward)
-                print(f"  Episode {episode_num}: {steps} steps, "
-                      f"reward={total_reward:.2f}, max_x={max_x:.2f}m")
-
-            print(f"[Visual eval #{self._visual_count}] Done — "
-                  f"{episode_num} episode(s) shown")
-        finally:
-            vis_env.close()
+            # Get the raw env from inside DummyVecEnv -> VecNormalize -> Monitor
+            raw_env = self.training_env.envs[0].unwrapped
+            if raw_env.robot is not None and raw_env.render_mode == "human":
+                pos = raw_env.robot.get_state()["base-position"]
+                pb.resetDebugVisualizerCamera(
+                    cameraDistance=3.0, cameraYaw=40.0, cameraPitch=-20.0,
+                    cameraTargetPosition=[pos[0], pos[1], 0.8],
+                    physicsClientId=raw_env.client)
+        except Exception:
+            pass
         return True
 
 
@@ -299,9 +178,7 @@ class PeriodicSaveCallback(BaseCallback):
 
     def _on_step(self) -> bool:
         if self.num_timesteps % self.save_freq == 0:
-            # Save latest model (overwrite)
             self.model.save(os.path.join(self.log_dir, f"{self.algo_name}_latest"))
-            # Save normalizer
             self.training_env.save(os.path.join(self.log_dir, "vecnormalize.pkl"))
         return True
 
@@ -309,7 +186,7 @@ class PeriodicSaveCallback(BaseCallback):
 # ── Main train function ─────────────────────────────────────────────────────
 
 def train(algo_name, total_timesteps, run_name, reward_weights=None,
-          visualize_every=10, live_plot=True, resume=False):
+          live_plot=True, resume=False):
     log_dir = os.path.join("runs", run_name)
     os.makedirs(log_dir, exist_ok=True)
     model_dir = os.path.join(log_dir, "models")
@@ -317,10 +194,10 @@ def train(algo_name, total_timesteps, run_name, reward_weights=None,
 
     rw = reward_weights if reward_weights else REWARD_WEIGHTS
 
-    # ── Auto-commit to git ──────────────────────────────────────────────────
+    # ── Auto-commit to git ──
     _auto_commit()
 
-    # ── Determine if resuming ───────────────────────────────────────────────
+    # ── Determine if resuming ──
     latest_model_path = os.path.join(log_dir, f"{algo_name}_latest.zip")
     final_model_path = os.path.join(log_dir, f"{algo_name}_final.zip")
     vecnorm_path = os.path.join(log_dir, "vecnormalize.pkl")
@@ -333,8 +210,9 @@ def train(algo_name, total_timesteps, run_name, reward_weights=None,
                          else final_model_path)
         print(f"\n[Resume] Loading model from: {model_to_load}")
 
-    # ── Create environments ─────────────────────────────────────────────────
-    train_env = DummyVecEnv([make_env(reward_weights=rw)])
+    # ── Create environments ──
+    # Training env: GUI mode so PyBullet window stays open the whole time
+    train_env = DummyVecEnv([make_env(render_mode="human", reward_weights=rw)])
 
     if can_resume and os.path.exists(vecnorm_path):
         print(f"[Resume] Loading VecNormalize from: {vecnorm_path}")
@@ -345,13 +223,14 @@ def train(algo_name, total_timesteps, run_name, reward_weights=None,
         train_env = VecNormalize(train_env, norm_obs=True, norm_reward=True,
                                  clip_obs=10.0)
 
+    # Eval env: headless
     eval_env = DummyVecEnv([make_env(reward_weights=rw)])
     eval_env = VecNormalize(eval_env, norm_obs=True, norm_reward=False,
                             clip_obs=10.0, training=False)
 
     eval_freq = 5_000
 
-    # ── Load or create model ────────────────────────────────────────────────
+    # ── Load or create model ──
     if can_resume:
         AlgoCls = PPO if algo_name == "ppo" else SAC
         model = AlgoCls.load(
@@ -377,7 +256,7 @@ def train(algo_name, total_timesteps, run_name, reward_weights=None,
         cfg_ref = PPO_CONFIG if algo_name == "ppo" else SAC_CONFIG
         total_timesteps = cfg_ref["total_timesteps"]
 
-    # ── Callbacks ───────────────────────────────────────────────────────────
+    # ── Callbacks ──
     eval_callback = EvalCallback(
         eval_env,
         best_model_save_path=os.path.join(log_dir, "best_model"),
@@ -396,35 +275,21 @@ def train(algo_name, total_timesteps, run_name, reward_weights=None,
         log_dir=log_dir,
         algo_name=algo_name,
     )
+    camera_callback = CameraFollowCallback()
 
-    cb_list = [eval_callback, checkpoint_callback, save_callback]
+    callbacks = CallbackList([
+        eval_callback, checkpoint_callback, save_callback, camera_callback
+    ])
 
-    if visualize_every and visualize_every > 0:
-        visual_callback = VisualEvalCallback(
-            eval_freq=eval_freq,
-            eval_interval=visualize_every,
-            reward_weights=rw,
-            algo_name=algo_name,
-            run_name=run_name,
-            total_target_steps=total_timesteps,
-        )
-        cb_list.append(visual_callback)
-
-    callbacks = CallbackList(cb_list)
-
-    # ── Save metadata ───────────────────────────────────────────────────────
+    # ── Save metadata ──
     meta = _save_run_metadata(
         log_dir, algo_name, total_timesteps, rw,
         resumed_from=model_to_load if can_resume else None,
-        extra={
-            "eval_freq": eval_freq,
-            "visualize_every": visualize_every,
-            "checkpoint_freq": 50_000,
-            "save_freq": 10_000,
-        },
+        extra={"eval_freq": eval_freq, "checkpoint_freq": 50_000,
+               "save_freq": 10_000},
     )
 
-    # ── Launch live plot ────────────────────────────────────────────────────
+    # ── Launch dashboard in separate process ──
     plot_proc = None
     if live_plot:
         plot_proc = subprocess.Popen(
@@ -432,14 +297,15 @@ def train(algo_name, total_timesteps, run_name, reward_weights=None,
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
 
-    # ── Train ───────────────────────────────────────────────────────────────
+    # ── Train ──
     action = "Resuming" if can_resume else "Training"
+    git_short = meta['training_history'][-1].get('git', {}).get('commit_short', 'N/A')
     print(f"\n{'='*60}")
     print(f"  {action} {algo_name.upper()} for {total_timesteps:,} timesteps")
     print(f"  Run: {run_name}  |  Log dir: {log_dir}")
-    print(f"  Git: {meta['training_history'][-1].get('git', {}).get('commit_short', 'N/A')}")
-    print(f"  Visual eval every {(visualize_every or 0) * eval_freq:,} steps")
-    print(f"  Checkpoints every 50,000 steps  |  Auto-save every 10,000 steps")
+    print(f"  Git: {git_short}")
+    print(f"  PyBullet GUI: OPEN  |  Dashboard: {'OPEN' if live_plot else 'OFF'}")
+    print(f"  Ctrl+C to pause and save for later resume")
     print(f"{'='*60}\n")
 
     start_time = time.time()
@@ -451,7 +317,7 @@ def train(algo_name, total_timesteps, run_name, reward_weights=None,
 
     elapsed = time.time() - start_time
 
-    # ── Save everything ─────────────────────────────────────────────────────
+    # ── Save everything ──
     final_path = os.path.join(log_dir, f"{algo_name}_final")
     model.save(final_path)
     model.save(os.path.join(log_dir, f"{algo_name}_latest"))
@@ -499,22 +365,16 @@ if __name__ == "__main__":
                         help="Run name for logging directory")
     parser.add_argument("--resume", type=str, default=None,
                         help="Path to run dir to resume (e.g. runs/sac_test)")
-    parser.add_argument("--visualize-every", type=int, default=10,
-                        help="Show GUI every N-th eval (0 to disable, default 10)")
     parser.add_argument("--no-plot", action="store_true",
-                        help="Disable live matplotlib plot")
+                        help="Disable live matplotlib dashboard")
     args = parser.parse_args()
 
     if args.resume:
-        # Resume mode: infer run name from path
         run_name = os.path.basename(args.resume.rstrip("/\\"))
         train(args.algo, args.timesteps, run_name,
-              visualize_every=args.visualize_every,
-              live_plot=not args.no_plot,
-              resume=True)
+              live_plot=not args.no_plot, resume=True)
     else:
         if args.name is None:
             args.name = f"{args.algo}_{int(time.time())}"
         train(args.algo, args.timesteps, args.name,
-              visualize_every=args.visualize_every,
               live_plot=not args.no_plot)
