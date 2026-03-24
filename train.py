@@ -207,7 +207,7 @@ class PeriodicSaveCallback(BaseCallback):
 # ── Main train function ─────────────────────────────────────────────────────
 
 def train(algo_name, total_timesteps, run_name, reward_weights=None,
-          live_plot=True, resume=False):
+          live_plot=True, resume=False, headless=False):
     log_dir = os.path.join("runs", run_name)
     os.makedirs(log_dir, exist_ok=True)
     model_dir = os.path.join(log_dir, "models")
@@ -237,8 +237,8 @@ def train(algo_name, total_timesteps, run_name, reward_weights=None,
         f.write("1")
 
     # ── Create environments ──
-    # Training env: GUI mode so PyBullet window stays open the whole time
-    train_env = DummyVecEnv([make_env(render_mode="human", reward_weights=rw,
+    render = None if headless else "human"
+    train_env = DummyVecEnv([make_env(render_mode=render, reward_weights=rw,
                                        monitor_dir=log_dir)])
 
     if can_resume and os.path.exists(vecnorm_path):
@@ -327,11 +327,12 @@ def train(algo_name, total_timesteps, run_name, reward_weights=None,
     # ── Train ──
     action = "Resuming" if can_resume else "Training"
     git_short = meta['training_history'][-1].get('git', {}).get('commit_short', 'N/A')
+    gui_status = "OFF (headless)" if headless else "OPEN"
     print(f"\n{'='*60}")
     print(f"  {action} {algo_name.upper()} for {total_timesteps:,} timesteps")
     print(f"  Run: {run_name}  |  Log dir: {log_dir}")
     print(f"  Git: {git_short}")
-    print(f"  PyBullet GUI: OPEN  |  Dashboard: {'OPEN' if live_plot else 'OFF'}")
+    print(f"  PyBullet GUI: {gui_status}  |  Dashboard: {'OPEN' if live_plot else 'OFF'}")
     print(f"  Ctrl+C to pause and save for later resume")
     print(f"{'='*60}\n")
 
@@ -394,14 +395,17 @@ if __name__ == "__main__":
                         help="Path to run dir to resume (e.g. runs/sac_test)")
     parser.add_argument("--no-plot", action="store_true",
                         help="Disable live matplotlib dashboard")
+    parser.add_argument("--headless", action="store_true",
+                        help="No PyBullet GUI (faster, use with dashboard)")
     args = parser.parse_args()
 
     if args.resume:
         run_name = os.path.basename(args.resume.rstrip("/\\"))
         train(args.algo, args.timesteps, run_name,
-              live_plot=not args.no_plot, resume=True)
+              live_plot=not args.no_plot, resume=True,
+              headless=args.headless)
     else:
         if args.name is None:
             args.name = f"{args.algo}_{int(time.time())}"
         train(args.algo, args.timesteps, args.name,
-              live_plot=not args.no_plot)
+              live_plot=not args.no_plot, headless=args.headless)
