@@ -159,7 +159,13 @@ def make_env(render_mode=None, reward_weights=None):
 # ── GUI Visualization Callback ───────────────────────────────────────────────
 
 class VisualEvalCallback(BaseCallback):
-    """Opens a GUI window periodically to show 1 episode with debug overlay."""
+    """Opens a GUI window periodically to show episodes with debug overlay.
+
+    The window stays open for a minimum of `min_display_sec` seconds,
+    running multiple episodes if needed so you can actually see the robot.
+    """
+
+    MIN_DISPLAY_SEC = 15  # keep the GUI open for at least this many seconds
 
     def __init__(self, eval_freq=10_000, eval_interval=10,
                  reward_weights=None, algo_name="", run_name="",
@@ -193,79 +199,88 @@ class VisualEvalCallback(BaseCallback):
         vis_env = gym.make("T1Walking-v0", render_mode="human",
                            reward_weights=self.reward_weights)
         try:
-            obs, _ = vis_env.reset()
-            vec_norm = self.training_env
             raw_env = vis_env.unwrapped
-
-            total_reward = 0.0
-            steps = 0
-            done = False
-            max_x = 0.0
+            vec_norm = self.training_env
             debug_ids = []
+            gui_start = time.time()
+            episode_num = 0
 
-            while not done:
-                obs_norm = vec_norm.normalize_obs(obs)
-                action, _ = self.model.predict(obs_norm, deterministic=True)
-                obs, reward, terminated, truncated, info = vis_env.step(action)
-                total_reward += reward
-                steps += 1
-                done = terminated or truncated
-                max_x = max(max_x, info.get("x_distance", 0))
+            # Run episodes until minimum display time is met
+            while (time.time() - gui_start) < self.MIN_DISPLAY_SEC:
+                episode_num += 1
+                obs, _ = vis_env.reset()
+                total_reward = 0.0
+                steps = 0
+                done = False
+                max_x = 0.0
 
-                # Camera follow
-                try:
-                    pos = raw_env.robot.get_state()["base-position"]
-                    pb.resetDebugVisualizerCamera(
-                        cameraDistance=3.0, cameraYaw=40.0, cameraPitch=-20.0,
-                        cameraTargetPosition=[pos[0], pos[1], 0.8],
-                        physicsClientId=raw_env.client)
-                except Exception:
-                    pass
+                while not done:
+                    obs_norm = vec_norm.normalize_obs(obs)
+                    action, _ = self.model.predict(obs_norm, deterministic=True)
+                    obs, reward, terminated, truncated, info = vis_env.step(action)
+                    total_reward += reward
+                    steps += 1
+                    done = terminated or truncated
+                    max_x = max(max_x, abs(info.get("x_distance", 0)))
 
-                # Debug overlay text (update every 10 steps)
-                if steps % 10 == 1:
+                    # Camera follow
                     try:
-                        for did in debug_ids:
-                            pb.removeUserDebugItem(did, physicsClientId=raw_env.client)
-                        debug_ids.clear()
-
-                        remaining = self.total_target_steps - self.num_timesteps
-                        eta_sec = remaining / max(steps_per_sec, 0.1)
-                        eta_str = (f"{eta_sec/3600:.1f}h" if eta_sec > 3600
-                                   else f"{eta_sec/60:.0f}m")
-
-                        lines = [
-                            f"Run: {self.run_name}  |  Algo: {self.algo_name.upper()}",
-                            f"Timestep: {self.num_timesteps:,} / {self.total_target_steps:,}",
-                            f"Speed: {steps_per_sec:.1f} steps/sec  |  ETA: {eta_str}",
-                            f"Visual eval: #{self._visual_count}  (every {self.eval_interval * self.eval_freq:,} steps)",
-                            f"Evals done: {self._eval_count}",
-                            f"Elapsed: {elapsed/60:.1f} min",
-                            f"",
-                            f"--- This Episode ---",
-                            f"Step: {steps}  |  Reward: {total_reward:.1f}",
-                            f"Max X: {max_x:.2f} m",
-                            f"Best visual reward: {self._best_visual_reward:.1f}",
-                        ]
-
-                        for i, line in enumerate(lines):
-                            did = pb.addUserDebugText(
-                                line,
-                                textPosition=[0, 0, 2.5 - i * 0.12],
-                                textColorRGB=[1, 1, 1],
-                                textSize=1.2,
-                                lifeTime=0,
-                                physicsClientId=raw_env.client,
-                            )
-                            debug_ids.append(did)
+                        pos = raw_env.robot.get_state()["base-position"]
+                        pb.resetDebugVisualizerCamera(
+                            cameraDistance=3.0, cameraYaw=40.0, cameraPitch=-20.0,
+                            cameraTargetPosition=[pos[0], pos[1], 0.8],
+                            physicsClientId=raw_env.client)
                     except Exception:
                         pass
 
-                time.sleep(1.0 / 60)
+                    # Update overlay text every 5 steps
+                    if steps % 5 == 1:
+                        try:
+                            for did in debug_ids:
+                                pb.removeUserDebugItem(did, physicsClientId=raw_env.client)
+                            debug_ids.clear()
 
-            self._best_visual_reward = max(self._best_visual_reward, total_reward)
-            print(f"[Visual eval] {steps} steps, reward={total_reward:.2f}, "
-                  f"max_x={max_x:.2f}m")
+                            remaining = self.total_target_steps - self.num_timesteps
+                            eta_sec = remaining / max(steps_per_sec, 0.1)
+                            eta_str = (f"{eta_sec/3600:.1f}h" if eta_sec > 3600
+                                       else f"{eta_sec/60:.0f}m")
+                            gui_remaining = max(0, self.MIN_DISPLAY_SEC - (time.time() - gui_start))
+
+                            lines = [
+                                f"Run: {self.run_name}  |  Algo: {self.algo_name.upper()}",
+                                f"Timestep: {self.num_timesteps:,} / {self.total_target_steps:,}  ({100*self.num_timesteps/max(self.total_target_steps,1):.1f}%)",
+                                f"Speed: {steps_per_sec:.1f} steps/sec  |  ETA: {eta_str}",
+                                f"Elapsed: {elapsed/60:.1f} min  |  Evals: {self._eval_count}",
+                                f"Visual: #{self._visual_count}  (every {self.eval_interval * self.eval_freq:,} steps)",
+                                f"Best visual reward: {self._best_visual_reward:.1f}",
+                                f"",
+                                f"--- Episode {episode_num} ---",
+                                f"Step: {steps}  |  Reward: {total_reward:.1f}",
+                                f"Max |X|: {max_x:.2f} m  |  Z: {info.get('torso_z', 0):.2f} m",
+                                f"Window closes in: {gui_remaining:.0f}s",
+                            ]
+
+                            for i, line in enumerate(lines):
+                                did = pb.addUserDebugText(
+                                    line,
+                                    textPosition=[0, 0, 2.8 - i * 0.14],
+                                    textColorRGB=[1, 1, 0.3] if i < 6 else [0.8, 1, 0.8],
+                                    textSize=1.3,
+                                    lifeTime=0,
+                                    physicsClientId=raw_env.client,
+                                )
+                                debug_ids.append(did)
+                        except Exception:
+                            pass
+
+                    time.sleep(1.0 / 60)
+
+                self._best_visual_reward = max(self._best_visual_reward, total_reward)
+                print(f"  Episode {episode_num}: {steps} steps, "
+                      f"reward={total_reward:.2f}, max_x={max_x:.2f}m")
+
+            print(f"[Visual eval #{self._visual_count}] Done — "
+                  f"{episode_num} episode(s) shown")
         finally:
             vis_env.close()
         return True
