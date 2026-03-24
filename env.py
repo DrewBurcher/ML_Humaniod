@@ -122,6 +122,14 @@ class T1WalkingEnv(gym.Env):
         return obs, {}
 
     def step(self, action):
+        # If physics server died (user closed GUI), reconnect and reset
+        if not self._is_connected():
+            self.client = None
+            self.robot = None
+            self.plane = None
+            obs, info = self.reset()
+            return obs, -10.0, True, False, info
+
         action = np.clip(action, -1.0, 1.0)
 
         # Scale normalized actions [-1, 1] to target joint positions within limits
@@ -129,16 +137,24 @@ class T1WalkingEnv(gym.Env):
 
         # Apply position control with limited forces
         max_forces = self.robot.joint_max_torque[self.actuated_indices].tolist()
-        p.setJointMotorControlArray(
-            self.robot.robot, self.actuated_indices, p.POSITION_CONTROL,
-            targetPositions=target_positions.tolist(),
-            positionGains=[0.2] * self.num_actuated,
-            velocityGains=[0.5] * self.num_actuated,
-            forces=max_forces,
-            physicsClientId=self.client)
+        try:
+            p.setJointMotorControlArray(
+                self.robot.robot, self.actuated_indices, p.POSITION_CONTROL,
+                targetPositions=target_positions.tolist(),
+                positionGains=[0.2] * self.num_actuated,
+                velocityGains=[0.5] * self.num_actuated,
+                forces=max_forces,
+                physicsClientId=self.client)
 
-        for _ in range(self.sim_steps_per_action):
-            p.stepSimulation(physicsClientId=self.client)
+            for _ in range(self.sim_steps_per_action):
+                p.stepSimulation(physicsClientId=self.client)
+        except Exception:
+            # Server died mid-step, terminate episode
+            self.client = None
+            self.robot = None
+            self.plane = None
+            obs, info = self.reset()
+            return obs, -10.0, True, False, info
 
         self.step_count += 1
         state = self.robot.get_state()

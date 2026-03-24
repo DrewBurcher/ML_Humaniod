@@ -74,6 +74,8 @@ class Dashboard:
         self.render_flag_path = os.path.join(run_dir, ".render_on")
         self.smooth_window = 20
         self.render_on = True
+        self._last_timesteps = 0
+        self._last_time = time.time()
 
         # ── Layout ──
         self.fig = plt.figure(figsize=(16, 10))
@@ -273,6 +275,13 @@ class Dashboard:
             lines.append(f"Avg (50):   {np.mean(recent):.1f}")
             lines.append(f"Best len:   {l.max()}")
 
+            # Compute speed from time column if available
+            if "t" in df.columns and len(df) > 1:
+                total_time = df["t"].values[-1]
+                if total_time > 0:
+                    fps = cum[-1] / total_time
+                    lines.append(f"Avg speed:  {fps:.0f} steps/sec")
+
         text = "\n".join(lines)
         ax.text(0.02, 0.98, text, transform=ax.transAxes,
                 fontsize=7, verticalalignment="top",
@@ -280,18 +289,29 @@ class Dashboard:
                 bbox=dict(boxstyle="round,pad=0.4", facecolor="lightyellow",
                           edgecolor="gray", alpha=0.9))
 
-        # ── Status bar ──
+        # ── Status bar with speed ──
         status_parts = []
         if has_data:
             r = df["r"].values
             l = df["l"].values
+            cur_ts = int(np.sum(l))
+            now = time.time()
+            dt = now - self._last_time
+            if dt > 0 and self._last_timesteps > 0:
+                speed = (cur_ts - self._last_timesteps) / dt
+                status_parts.append(f"Speed: {speed:.0f} steps/sec")
+            self._last_timesteps = cur_ts
+            self._last_time = now
             status_parts.append(f"Eps: {len(r)}")
-            status_parts.append(f"Steps: {np.sum(l):,}")
+            status_parts.append(f"Steps: {cur_ts:,}")
             status_parts.append(f"Last reward: {r[-1]:.1f}")
         status_parts.append(f"Render: {'ON' if self.render_on else 'OFF'}")
         status_parts.append(f"Smooth: {self.smooth_window}")
         status_parts.append(f"Updated: {time.strftime('%H:%M:%S')}")
         self.status_text.set_text("  |  ".join(status_parts))
+
+        self.fig.canvas.draw_idle()
+        self.fig.canvas.flush_events()
 
     def run(self):
         """Start the dashboard with a timer-based refresh."""
