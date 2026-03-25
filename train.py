@@ -263,6 +263,10 @@ class PeriodicSaveCallback(BaseCallback):
         if self.num_timesteps % self.save_freq == 0:
             self.model.save(os.path.join(self.log_dir, f"{self.algo_name}_latest"))
             self.training_env.save(os.path.join(self.log_dir, "vecnormalize.pkl"))
+            # Save replay buffer for SAC/off-policy (enables seamless resume)
+            if hasattr(self.model, "replay_buffer") and self.model.replay_buffer is not None:
+                buf_path = os.path.join(self.log_dir, "replay_buffer")
+                self.model.save_replay_buffer(buf_path)
         return True
 
 
@@ -344,6 +348,14 @@ def train(algo_name, total_timesteps, run_name, reward_weights=None,
             tensorboard_log=os.path.join(log_dir, "tb"),
         )
         print(f"[Resume] Model loaded. Adding {total_timesteps:,} more steps.")
+
+        # Load replay buffer if available (critical for SAC resume quality)
+        replay_buf_path = os.path.join(log_dir, "replay_buffer.pkl")
+        if hasattr(model, "replay_buffer") and os.path.exists(replay_buf_path):
+            model.load_replay_buffer(replay_buf_path)
+            print(f"[Resume] Replay buffer loaded ({model.replay_buffer.size()} transitions)")
+        else:
+            print("[Resume] WARNING: No replay buffer found — critic may be unstable initially")
     else:
         if algo_name == "ppo":
             cfg = PPO_CONFIG.copy()
@@ -469,6 +481,10 @@ def train(algo_name, total_timesteps, run_name, reward_weights=None,
     model.save(final_path)
     model.save(os.path.join(log_dir, f"{algo_name}_latest"))
     train_env.save(os.path.join(log_dir, "vecnormalize.pkl"))
+    # Save replay buffer for seamless resume
+    if hasattr(model, "replay_buffer") and model.replay_buffer is not None:
+        model.save_replay_buffer(os.path.join(log_dir, "replay_buffer"))
+        print(f"[Save] Replay buffer saved ({model.replay_buffer.size()} transitions)")
 
     # Update metadata with final stats
     meta_path = os.path.join(log_dir, "run_metadata.json")
