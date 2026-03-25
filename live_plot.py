@@ -6,8 +6,6 @@ Live training dashboard with plots and controls.
 Controls:
     - Render ON/OFF: toggle PyBullet rendering (OFF = faster training)
     - Smoothing slider: adjust plot smoothing window
-
-Reads monitor.csv + eval logs + run_metadata.json, refreshes every 2 seconds.
 """
 
 import argparse
@@ -18,18 +16,16 @@ import time
 import matplotlib
 matplotlib.use("TkAgg")
 import matplotlib.pyplot as plt
-from matplotlib.widgets import Button, Slider, CheckButtons
+from matplotlib.widgets import Button, Slider
 import matplotlib.gridspec as gridspec
 import numpy as np
 import pandas as pd
 
 
 def read_monitor_csv(run_dir):
-    """Read SB3 Monitor CSV from the run directory."""
+    import glob
     path = os.path.join(run_dir, "monitor.monitor.csv")
     if not os.path.exists(path):
-        # Try alternate names
-        import glob
         candidates = glob.glob(os.path.join(run_dir, "*.monitor.csv"))
         if not candidates:
             return None
@@ -41,7 +37,6 @@ def read_monitor_csv(run_dir):
 
 
 def load_eval(run_dir):
-    """Load eval results."""
     path = os.path.join(run_dir, "eval_logs", "evaluations.npz")
     if os.path.exists(path):
         try:
@@ -62,10 +57,38 @@ def load_metadata(run_dir):
     return None
 
 
+def load_metrics(run_dir):
+    path = os.path.join(run_dir, "metrics.json")
+    if os.path.exists(path):
+        try:
+            with open(path, "r") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return None
+
+
 def smooth(y, window):
     if len(y) < 2 or window < 2:
         return y
     return pd.Series(y).rolling(window, min_periods=1).mean().values
+
+
+COMPONENT_LABELS = {
+    "velocity_reward": "Velocity",
+    "survival_reward": "Survival",
+    "energy_penalty": "Energy",
+    "orientation_penalty": "Orientation",
+    "joint_limit_penalty": "Joint Limits",
+}
+
+COMPONENT_COLORS = {
+    "velocity_reward": "#2ecc71",
+    "survival_reward": "#3498db",
+    "energy_penalty": "#e74c3c",
+    "orientation_penalty": "#e67e22",
+    "joint_limit_penalty": "#9b59b6",
+}
 
 
 class Dashboard:
@@ -77,41 +100,45 @@ class Dashboard:
         self._last_timesteps = 0
         self._last_time = time.time()
 
-        # ── Layout ──
-        self.fig = plt.figure(figsize=(16, 10))
+        # ── Layout: 3 rows x 3 cols + control bar ──
+        self.fig = plt.figure(figsize=(18, 12))
         self.fig.canvas.manager.set_window_title(
-            f"Training Dashboard — {os.path.basename(run_dir)}")
+            f"Training Dashboard - {os.path.basename(run_dir)}")
 
-        # Main grid: top row for plots, bottom row for plots + info + controls
-        gs = gridspec.GridSpec(3, 3, figure=self.fig,
-                               height_ratios=[1, 1, 0.15],
-                               hspace=0.4, wspace=0.35)
+        gs = gridspec.GridSpec(4, 3, figure=self.fig,
+                               height_ratios=[1, 1, 1, 0.08],
+                               hspace=0.45, wspace=0.35)
 
+        # Row 1: Episode Reward, Episode Length, Reward vs Timesteps
         self.ax_reward = self.fig.add_subplot(gs[0, 0])
         self.ax_length = self.fig.add_subplot(gs[0, 1])
         self.ax_reward_ts = self.fig.add_subplot(gs[0, 2])
+
+        # Row 2: Eval Performance, Actor/Critic Loss, Reward Distribution
         self.ax_eval = self.fig.add_subplot(gs[1, 0])
-        self.ax_dist = self.fig.add_subplot(gs[1, 1])
-        self.ax_info = self.fig.add_subplot(gs[1, 2])
+        self.ax_loss = self.fig.add_subplot(gs[1, 1])
+        self.ax_dist = self.fig.add_subplot(gs[1, 2])
+
+        # Row 3: Pie chart, Reward components over time, Run Info
+        self.ax_pie = self.fig.add_subplot(gs[2, 0])
+        self.ax_components = self.fig.add_subplot(gs[2, 1])
+        self.ax_info = self.fig.add_subplot(gs[2, 2])
 
         # ── Controls row ──
-        # Render toggle button
-        ax_render_btn = self.fig.add_axes([0.05, 0.02, 0.12, 0.04])
+        ax_render_btn = self.fig.add_axes([0.05, 0.01, 0.10, 0.03])
         self.render_btn = Button(ax_render_btn, 'Render: ON',
                                   color='lightgreen', hovercolor='palegreen')
         self.render_btn.on_clicked(self._toggle_render)
 
-        # Smoothing slider
-        ax_smooth = self.fig.add_axes([0.30, 0.02, 0.25, 0.03])
-        self.smooth_slider = Slider(ax_smooth, 'Smoothing', 1, 100,
+        ax_smooth = self.fig.add_axes([0.25, 0.015, 0.20, 0.02])
+        self.smooth_slider = Slider(ax_smooth, 'Smooth', 1, 100,
                                      valinit=20, valstep=1)
         self.smooth_slider.on_changed(self._on_smooth_change)
 
-        # Status text
-        self.ax_status = self.fig.add_axes([0.62, 0.01, 0.35, 0.05])
+        self.ax_status = self.fig.add_axes([0.50, 0.005, 0.48, 0.035])
         self.ax_status.axis('off')
         self.status_text = self.ax_status.text(
-            0, 0.5, "", fontsize=9, fontfamily="monospace",
+            0, 0.5, "", fontsize=8, fontfamily="monospace",
             verticalalignment="center")
 
         self.fig.suptitle(
@@ -139,6 +166,7 @@ class Dashboard:
         meta = load_metadata(self.run_dir)
         df = read_monitor_csv(self.run_dir)
         eval_data = load_eval(self.run_dir)
+        metrics = load_metrics(self.run_dir)
         w = self.smooth_window
         has_data = df is not None and len(df) > 0
 
@@ -210,6 +238,61 @@ class Dashboard:
         ax.set_title("Evaluation Performance")
         ax.grid(True, alpha=0.3)
 
+        # ── Actor / Critic Loss ──
+        ax = self.ax_loss
+        ax.clear()
+        if metrics and len(metrics.get("losses", [])) > 0:
+            losses = metrics["losses"]
+            ts = [e["timestep"] for e in losses]
+
+            # SAC losses
+            actor = [e.get("actor_loss", None) for e in losses]
+            critic = [e.get("critic_loss", None) for e in losses]
+            # PPO losses
+            policy_grad = [e.get("policy_gradient_loss", None) for e in losses]
+            value = [e.get("value_loss", None) for e in losses]
+
+            has_actor = any(v is not None for v in actor)
+            has_critic = any(v is not None for v in critic)
+            has_pg = any(v is not None for v in policy_grad)
+            has_vl = any(v is not None for v in value)
+
+            if has_actor:
+                vals = [v for v in actor if v is not None]
+                t = [ts[i] for i, v in enumerate(actor) if v is not None]
+                ax.plot(t, vals, color="crimson", linewidth=1.5, alpha=0.7, label="Actor Loss")
+            if has_critic:
+                vals = [v for v in critic if v is not None]
+                t = [ts[i] for i, v in enumerate(critic) if v is not None]
+                ax2 = ax.twinx()
+                ax2.plot(t, vals, color="royalblue", linewidth=1.5, alpha=0.7, label="Critic Loss")
+                ax2.set_ylabel("Critic Loss", color="royalblue", fontsize=8)
+                ax2.tick_params(axis='y', labelcolor="royalblue", labelsize=7)
+            if has_pg:
+                vals = [v for v in policy_grad if v is not None]
+                t = [ts[i] for i, v in enumerate(policy_grad) if v is not None]
+                ax.plot(t, vals, color="crimson", linewidth=1.5, alpha=0.7, label="Policy Loss")
+            if has_vl:
+                vals = [v for v in value if v is not None]
+                t = [ts[i] for i, v in enumerate(value) if v is not None]
+                ax2 = ax.twinx()
+                ax2.plot(t, vals, color="royalblue", linewidth=1.5, alpha=0.7, label="Value Loss")
+                ax2.set_ylabel("Value Loss", color="royalblue", fontsize=8)
+                ax2.tick_params(axis='y', labelcolor="royalblue", labelsize=7)
+
+            ax.legend(loc="upper left", fontsize=7)
+            if has_critic or has_vl:
+                ax2.legend(loc="upper right", fontsize=7)
+        else:
+            ax.text(0.5, 0.5, "Waiting for loss data...",
+                    ha="center", va="center", transform=ax.transAxes)
+        ax.set_xlim(left=0)
+        ax.set_xlabel("Timesteps")
+        ax.set_ylabel("Actor Loss", color="crimson", fontsize=8)
+        ax.tick_params(axis='y', labelcolor="crimson", labelsize=7)
+        ax.set_title("Actor / Critic Loss")
+        ax.grid(True, alpha=0.3)
+
         # ── Reward Distribution ──
         ax = self.ax_dist
         ax.clear()
@@ -225,6 +308,70 @@ class Dashboard:
         ax.set_xlabel("Reward")
         ax.set_ylabel("Count")
         ax.set_title("Reward Distribution")
+        ax.grid(True, alpha=0.3)
+
+        # ── Pie Chart: Reward component contribution ──
+        ax = self.ax_pie
+        ax.clear()
+        if metrics and len(metrics.get("reward_components", [])) > 0:
+            rc = metrics["reward_components"]
+            # Use last 50 episodes
+            recent = rc[-50:] if len(rc) > 50 else rc
+            keys = [k for k in COMPONENT_LABELS.keys()]
+            avgs = {}
+            for k in keys:
+                vals = [e.get(k, 0) for e in recent]
+                avgs[k] = np.mean(vals) if vals else 0
+
+            # Use absolute values for pie chart sizing
+            labels = []
+            sizes = []
+            colors = []
+            for k in keys:
+                v = abs(avgs[k])
+                if v > 0.001:
+                    labels.append(COMPONENT_LABELS[k])
+                    sizes.append(v)
+                    colors.append(COMPONENT_COLORS[k])
+
+            if sizes:
+                wedges, texts, autotexts = ax.pie(
+                    sizes, labels=labels, colors=colors,
+                    autopct='%1.1f%%', textprops={'fontsize': 7},
+                    pctdistance=0.8)
+                for t in autotexts:
+                    t.set_fontsize(6)
+                ax.set_title("Reward Breakdown\n(avg |magnitude| per step, last 50 eps)",
+                             fontsize=9)
+            else:
+                ax.text(0.5, 0.5, "Waiting for data...",
+                        ha="center", va="center", transform=ax.transAxes)
+                ax.set_title("Reward Breakdown")
+        else:
+            ax.text(0.5, 0.5, "Waiting for data...",
+                    ha="center", va="center", transform=ax.transAxes)
+            ax.set_title("Reward Breakdown")
+
+        # ── Reward components over time ──
+        ax = self.ax_components
+        ax.clear()
+        if metrics and len(metrics.get("reward_components", [])) > 5:
+            rc = metrics["reward_components"]
+            eps = [e.get("episode", i) for i, e in enumerate(rc)]
+            for k in COMPONENT_LABELS:
+                vals = [e.get(k, 0) for e in rc]
+                if any(v != 0 for v in vals):
+                    ax.plot(eps, smooth(np.array(vals), w),
+                            color=COMPONENT_COLORS[k], linewidth=1.5,
+                            label=COMPONENT_LABELS[k])
+            ax.legend(fontsize=6, loc="best")
+        else:
+            ax.text(0.5, 0.5, "Waiting for data...",
+                    ha="center", va="center", transform=ax.transAxes)
+        ax.set_xlim(left=0)
+        ax.set_xlabel("Episode")
+        ax.set_ylabel("|Reward| per step")
+        ax.set_title("Reward Components Over Time")
         ax.grid(True, alpha=0.3)
 
         # ── Run Info ──
@@ -279,7 +426,6 @@ class Dashboard:
             lines.append(f"Avg (50):   {np.mean(recent):.1f}")
             lines.append(f"Best len:   {l.max()}")
 
-            # Compute speed from time column if available
             if "t" in df.columns and len(df) > 1:
                 total_time = df["t"].values[-1]
                 if total_time > 0:
@@ -288,12 +434,12 @@ class Dashboard:
 
         text = "\n".join(lines)
         ax.text(0.02, 0.98, text, transform=ax.transAxes,
-                fontsize=7, verticalalignment="top",
+                fontsize=6.5, verticalalignment="top",
                 fontfamily="monospace",
                 bbox=dict(boxstyle="round,pad=0.4", facecolor="lightyellow",
                           edgecolor="gray", alpha=0.9))
 
-        # ── Status bar with speed ──
+        # ── Status bar ──
         status_parts = []
         if has_data:
             r = df["r"].values
@@ -318,7 +464,6 @@ class Dashboard:
         self.fig.canvas.flush_events()
 
     def run(self):
-        """Start the dashboard with a timer-based refresh."""
         self.update()
         timer = self.fig.canvas.new_timer(interval=2000)
         timer.add_callback(self.update)

@@ -186,6 +186,80 @@ class CameraFollowCallback(BaseCallback):
         return True
 
 
+# ── Metrics logging callback ─────────────────────────────────────────────────
+
+class MetricsCallback(BaseCallback):
+    """Logs reward components and SAC/PPO losses to a JSON file for the dashboard."""
+
+    def __init__(self, log_dir="", save_freq=100, verbose=0):
+        super().__init__(verbose)
+        self.log_dir = log_dir
+        self.save_freq = save_freq
+        self.metrics_path = os.path.join(log_dir, "metrics.json")
+        self._reward_components = {}  # accumulate per episode
+        self._episode_count = 0
+        self._data = {
+            "reward_components": [],   # per-episode avg breakdown
+            "losses": [],              # actor/critic loss snapshots
+        }
+        # Load existing if resuming
+        if os.path.exists(self.metrics_path):
+            try:
+                with open(self.metrics_path, "r") as f:
+                    self._data = json.load(f)
+            except Exception:
+                pass
+
+    def _on_step(self) -> bool:
+        # Accumulate reward components from info
+        infos = self.locals.get("infos", [{}])
+        for info in infos:
+            ri = info.get("reward_info", {})
+            for k, v in ri.items():
+                if k == "forward_vel":
+                    continue  # not a reward component
+                self._reward_components[k] = self._reward_components.get(k, 0) + abs(float(v))
+            self._reward_components["_steps"] = self._reward_components.get("_steps", 0) + 1
+
+            # Episode ended
+            if info.get("episode"):
+                steps = max(self._reward_components.pop("_steps", 1), 1)
+                entry = {
+                    "episode": self._episode_count,
+                    "timestep": int(self.num_timesteps),
+                }
+                for k, v in self._reward_components.items():
+                    entry[k] = round(v / steps, 4)  # per-step average
+                self._data["reward_components"].append(entry)
+                self._reward_components = {}
+                self._episode_count += 1
+
+        # Log losses from the model's logger
+        if self.num_timesteps % self.save_freq == 0:
+            loss_entry = {"timestep": int(self.num_timesteps)}
+            try:
+                logger = self.model.logger.name_to_value
+                for key in ["train/actor_loss", "train/critic_loss",
+                             "train/ent_coef_loss", "train/ent_coef",
+                             "train/policy_gradient_loss", "train/value_loss",
+                             "train/entropy_loss"]:
+                    if key in logger:
+                        loss_entry[key.split("/")[1]] = round(float(logger[key]), 6)
+            except Exception:
+                pass
+            if len(loss_entry) > 1:
+                self._data["losses"].append(loss_entry)
+
+            # Save to disk
+            try:
+                with open(self.metrics_path, "w") as f:
+                    json.dump(self._data, f)
+            except Exception:
+                pass
+
+        return True
+
+
 # ── Periodic save callback (for resume support) ─────────────────────────────
 
 class PeriodicSaveCallback(BaseCallback):
@@ -303,9 +377,11 @@ def train(algo_name, total_timesteps, run_name, reward_weights=None,
         algo_name=algo_name,
     )
     camera_callback = CameraFollowCallback(render_flag_path=render_flag_path)
+    metrics_callback = MetricsCallback(log_dir=log_dir, save_freq=100)
 
     callbacks = CallbackList([
-        eval_callback, checkpoint_callback, save_callback, camera_callback
+        eval_callback, checkpoint_callback, save_callback,
+        camera_callback, metrics_callback
     ])
 
     # ── Save metadata ──
