@@ -242,7 +242,19 @@ class T1WalkingEnv(gym.Env):
         normalized = 2.0 * (joint_pos - lower) / ranges - 1.0
         limit_pen = w["joint_limit_penalty"] * np.sum(np.maximum(np.abs(normalized) - 0.9, 0.0))
 
-        total_reward = vel_reward + survival + energy_pen + orientation_pen + limit_pen
+        # 6. Height reward: reward torso z being close to initial height
+        torso_z = state["base-position"][2]
+        target_z = self.cfg["initial_height"]
+        # Gaussian reward centered on initial height, drops off as it deviates
+        height_rew = w.get("height_reward", 0) * np.exp(-5.0 * (torso_z - target_z) ** 2)
+
+        # 7. Z fall velocity penalty: penalize downward velocity only
+        z_vel = state["base-linear-velocity"][2]
+        # Only penalize negative (falling) z velocity, ignore upward
+        z_fall_pen = w.get("z_fall_velocity_penalty", 0) * max(-z_vel, 0.0)
+
+        total_reward = (vel_reward + survival + energy_pen + orientation_pen
+                        + limit_pen + height_rew + z_fall_pen)
 
         reward_info = {
             "velocity_reward": vel_reward,
@@ -250,6 +262,8 @@ class T1WalkingEnv(gym.Env):
             "energy_penalty": energy_pen,
             "orientation_penalty": orientation_pen,
             "joint_limit_penalty": limit_pen,
+            "height_reward": height_rew,
+            "z_fall_penalty": z_fall_pen,
             "forward_vel": forward_vel,
         }
         return total_reward, reward_info

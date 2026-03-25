@@ -14,12 +14,14 @@ ENV_CONFIG = {
 
 # ── Reward weights (tunable) ─────────────────────────────────────────────────
 REWARD_WEIGHTS = {
-    "forward_velocity": 1.0,       # Reward for moving toward target speed
+    "forward_velocity": 1.5,       # Reward for moving toward target speed (1.5x)
     "survival": 2.0,               # Bonus each timestep for staying alive
     "energy_penalty": -0.0033,     # Penalty per avg power (mean |torque*vel|)
-    "fall_penalty": -100.0,        # Large penalty for falling (must outweigh dying-early exploit)
+    "fall_penalty": -100.0,        # Large penalty for falling
     "orientation_penalty": -0.3,   # Penalty for torso tilt
-    "joint_limit_penalty": -0.1,   # Penalty for approaching joint limits
+    "joint_limit_penalty": -1.0,   # Penalty for approaching joint limits (10x)
+    "height_reward": 1.0,          # Reward for maintaining torso height near initial
+    "z_fall_velocity_penalty": -0.5,  # Penalty for downward z velocity (don't reward upward)
 }
 
 # ── PPO hyperparameters ──────────────────────────────────────────────────────
@@ -41,7 +43,7 @@ PPO_CONFIG = {
 
 # ── SAC hyperparameters ──────────────────────────────────────────────────────
 SAC_CONFIG = {
-    "learning_rate": 1e-3,
+    "learning_rate": 3e-4,
     "buffer_size": 1_000_000,
     "learning_starts": 1_000,
     "batch_size": 256,
