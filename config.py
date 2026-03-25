@@ -50,6 +50,7 @@ SAC_CONFIG = {
     "tau": 0.005,
     "gamma": 0.99,
     "ent_coef": "auto",
+    "target_entropy": -5,
     "policy_kwargs": dict(net_arch=[256, 256]),
     "device": "cpu",
     "total_timesteps": 2_000_000,
@@ -69,5 +70,5 @@ ARM_JOINT_INDICES = [
     6, 7, 8, 9,    # Right arm
 ]
 
-# All actuated joints (everything except head: joints 0, 1)
-ACTUATED_JOINT_INDICES = ARM_JOINT_INDICES + LEG_JOINT_INDICES
+# Active actuated joints — legs only for now (arms added later)
+ACTUATED_JOINT_INDICES = LEG_JOINT_INDICES

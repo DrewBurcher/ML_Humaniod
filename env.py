@@ -32,7 +32,7 @@ class T1WalkingEnv(gym.Env):
 
         # ── Observation space ────────────────────────────────────────────────
         # torso z (1) + torso orientation as euler (3) + torso linear vel (3)
-        # + torso angular vel (3) + joint positions (21 actuated) + joint velocities (21 actuated)
+        # + torso angular vel (3) + joint positions (N actuated) + joint velocities (N actuated)
         obs_dim = 1 + 3 + 3 + 3 + self.num_actuated + self.num_actuated
         self.observation_space = spaces.Box(low=-np.inf, high=np.inf,
                                             shape=(obs_dim,), dtype=np.float32)
@@ -109,7 +109,30 @@ class T1WalkingEnv(gym.Env):
 
         self.robot.reset([0.0] * T1.NUM_JOINTS)
 
-        for _ in range(50):
+        # Settle with motors holding the standing pose (not ragdolling)
+        max_forces = self.robot.joint_max_torque[self.actuated_indices].tolist()
+        zero_targets = [0.0] * self.num_actuated
+        p.setJointMotorControlArray(
+            self.robot.robot, self.actuated_indices, p.POSITION_CONTROL,
+            targetPositions=zero_targets,
+            positionGains=[0.5] * self.num_actuated,
+            velocityGains=[1.0] * self.num_actuated,
+            forces=max_forces,
+            physicsClientId=self.client)
+
+        # Also lock arm joints in place (they're not actuated but shouldn't ragdoll)
+        from config import ARM_JOINT_INDICES
+        if ARM_JOINT_INDICES:
+            arm_forces = self.robot.joint_max_torque[ARM_JOINT_INDICES].tolist()
+            p.setJointMotorControlArray(
+                self.robot.robot, ARM_JOINT_INDICES, p.POSITION_CONTROL,
+                targetPositions=[0.0] * len(ARM_JOINT_INDICES),
+                positionGains=[0.5] * len(ARM_JOINT_INDICES),
+                velocityGains=[1.0] * len(ARM_JOINT_INDICES),
+                forces=arm_forces,
+                physicsClientId=self.client)
+
+        for _ in range(10):
             p.stepSimulation(physicsClientId=self.client)
 
         self.step_count = 0
@@ -156,6 +179,18 @@ class T1WalkingEnv(gym.Env):
                 velocityGains=[0.5] * self.num_actuated,
                 forces=max_forces,
                 physicsClientId=self.client)
+
+            # Keep arms locked in place (not actuated by policy)
+            from config import ARM_JOINT_INDICES
+            if ARM_JOINT_INDICES:
+                arm_forces = self.robot.joint_max_torque[ARM_JOINT_INDICES].tolist()
+                p.setJointMotorControlArray(
+                    self.robot.robot, ARM_JOINT_INDICES, p.POSITION_CONTROL,
+                    targetPositions=[0.0] * len(ARM_JOINT_INDICES),
+                    positionGains=[0.5] * len(ARM_JOINT_INDICES),
+                    velocityGains=[1.0] * len(ARM_JOINT_INDICES),
+                    forces=arm_forces,
+                    physicsClientId=self.client)
 
             for _ in range(self.sim_steps_per_action):
                 p.stepSimulation(physicsClientId=self.client)
