@@ -171,18 +171,6 @@ class CameraFollowCallback(BaseCallback):
             except Exception:
                 pass
 
-        # Camera follow
-        if self._rendering:
-            try:
-                raw_env = self.training_env.envs[0].unwrapped
-                if raw_env.robot is not None:
-                    pos = raw_env.robot.get_state()["base-position"]
-                    pb.resetDebugVisualizerCamera(
-                        cameraDistance=3.0, cameraYaw=40.0, cameraPitch=-20.0,
-                        cameraTargetPosition=[pos[0], pos[1], 0.8],
-                        physicsClientId=raw_env.client)
-            except Exception:
-                pass
         return True
 
 
