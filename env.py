@@ -268,14 +268,16 @@ class T1WalkingEnv(gym.Env):
         roll, pitch = euler[0], euler[1]
         orientation_pen = w["orientation_penalty"] * (roll ** 2 + pitch ** 2)
 
-        # 5. Joint limit penalty
+        # 5. Joint limit penalty (gradual quadratic ramp starting at 50% of range)
         joint_pos = state["joint-position"][self.actuated_indices]
         lower = self.robot.joint_lower[self.actuated_indices]
         upper = self.robot.joint_upper[self.actuated_indices]
         ranges = upper - lower + 1e-8
         # Normalized distance from center (0 = center, 1 = at limit)
         normalized = 2.0 * (joint_pos - lower) / ranges - 1.0
-        limit_pen = w["joint_limit_penalty"] * np.sum(np.maximum(np.abs(normalized) - 0.9, 0.0))
+        # Quadratic penalty past 50%: gentle at 0.5, strong near 1.0
+        excess = np.maximum(np.abs(normalized) - 0.5, 0.0)
+        limit_pen = w["joint_limit_penalty"] * np.sum(excess ** 2)
 
         # 6. Height reward: reward torso z being close to initial height
         torso_z = state["base-position"][2]

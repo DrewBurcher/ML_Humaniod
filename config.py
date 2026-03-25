@@ -18,8 +18,8 @@ REWARD_WEIGHTS = {
     "survival": 2.0,               # Bonus each timestep for staying alive
     "energy_penalty": -0.0033,     # Penalty per avg power (mean |torque*vel|)
     "fall_penalty": -100.0,        # Large penalty for falling
-    "orientation_penalty": -0.3,   # Penalty for torso tilt
-    "joint_limit_penalty": -1.0,   # Penalty for approaching joint limits (10x)
+    "orientation_penalty": -1.0,   # Penalty for torso tilt (quadratic on roll+pitch)
+    "joint_limit_penalty": -2.0,   # Gradual quadratic penalty past 50% of range
     "height_reward": 1.0,          # Reward for maintaining torso height near initial
     "z_fall_velocity_penalty": -0.5,  # Penalty for downward z velocity (don't reward upward)
 }

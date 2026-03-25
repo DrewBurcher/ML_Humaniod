@@ -397,6 +397,44 @@ def train(algo_name, total_timesteps, run_name, reward_weights=None,
                "save_freq": 10_000},
     )
 
+    # ── Random baseline eval (only for fresh runs) ──
+    if not can_resume:
+        print("[Baseline] Running 5 episodes with random actions...")
+        baseline_env = DummyVecEnv([make_env(reward_weights=rw, monitor_dir=None)])
+        baseline_env = VecNormalize(baseline_env, norm_obs=True, norm_reward=False,
+                                     clip_obs=10.0, training=False)
+        baseline_rewards = []
+        baseline_lengths = []
+        for ep in range(5):
+            obs = baseline_env.reset()
+            done = False
+            ep_reward = 0.0
+            ep_len = 0
+            while not done:
+                action_rand = np.array([baseline_env.action_space.sample()])
+                obs, reward, dones, infos = baseline_env.step(action_rand)
+                ep_reward += reward[0]
+                ep_len += 1
+                done = dones[0]
+            baseline_rewards.append(ep_reward)
+            baseline_lengths.append(ep_len)
+        baseline_env.close()
+        mean_r = np.mean(baseline_rewards)
+        mean_l = np.mean(baseline_lengths)
+        print(f"[Baseline] Random policy: avg reward={mean_r:.1f}, "
+              f"avg length={mean_l:.1f}")
+
+        # Pre-seed the eval log so the dashboard shows timestep=0 baseline
+        eval_log_dir = os.path.join(log_dir, "eval_logs")
+        os.makedirs(eval_log_dir, exist_ok=True)
+        np.savez(
+            os.path.join(eval_log_dir, "evaluations.npz"),
+            timesteps=np.array([0]),
+            results=np.array([baseline_rewards]),
+            ep_lengths=np.array([baseline_lengths]),
+        )
+        print(f"[Baseline] Saved to eval_logs as timestep=0 reference\n")
+
     # ── Launch dashboard in separate process ──
     plot_proc = None
     if live_plot:
