@@ -41,7 +41,7 @@ PPO_CONFIG = {
 
 # ── SAC hyperparameters ──────────────────────────────────────────────────────
 SAC_CONFIG = {
-    "learning_rate": 3e-4,
+    "learning_rate": 1e-3,
     "buffer_size": 1_000_000,
     "learning_starts": 1_000,
     "batch_size": 256,

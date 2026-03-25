@@ -117,6 +117,7 @@ class Dashboard:
         # Row 2: Eval Performance, Actor/Critic Loss, Reward Distribution
         self.ax_eval = self.fig.add_subplot(gs[1, 0])
         self.ax_loss = self.fig.add_subplot(gs[1, 1])
+        self.ax_loss2 = self.ax_loss.twinx()  # create once, reuse
         self.ax_dist = self.fig.add_subplot(gs[1, 2])
 
         # Row 3: Pie chart, Reward components over time, Run Info
@@ -241,6 +242,7 @@ class Dashboard:
         # ── Actor / Critic Loss ──
         ax = self.ax_loss
         ax.clear()
+        self.ax_loss2.clear()
         if metrics and len(metrics.get("losses", [])) > 0:
             losses = metrics["losses"]
             ts = [e["timestep"] for e in losses]
@@ -260,35 +262,34 @@ class Dashboard:
             if has_actor:
                 vals = [v for v in actor if v is not None]
                 t = [ts[i] for i, v in enumerate(actor) if v is not None]
-                ax.plot(t, vals, color="crimson", linewidth=1.5, alpha=0.7, label="Actor Loss")
-            if has_critic:
-                vals = [v for v in critic if v is not None]
-                t = [ts[i] for i, v in enumerate(critic) if v is not None]
-                ax2 = ax.twinx()
-                ax2.plot(t, vals, color="royalblue", linewidth=1.5, alpha=0.7, label="Critic Loss")
-                ax2.set_ylabel("Critic Loss", color="royalblue", fontsize=8)
-                ax2.tick_params(axis='y', labelcolor="royalblue", labelsize=7)
+                ax.plot(t, vals, color="crimson", linewidth=1.5, alpha=0.7, label="Actor")
             if has_pg:
                 vals = [v for v in policy_grad if v is not None]
                 t = [ts[i] for i, v in enumerate(policy_grad) if v is not None]
-                ax.plot(t, vals, color="crimson", linewidth=1.5, alpha=0.7, label="Policy Loss")
+                ax.plot(t, vals, color="crimson", linewidth=1.5, alpha=0.7, label="Policy")
+            if has_critic:
+                vals = [v for v in critic if v is not None]
+                t = [ts[i] for i, v in enumerate(critic) if v is not None]
+                self.ax_loss2.plot(t, vals, color="royalblue", linewidth=1.5, alpha=0.7, label="Critic")
+                self.ax_loss2.set_ylabel("Critic", color="royalblue", fontsize=8)
+                self.ax_loss2.tick_params(axis='y', labelcolor="royalblue", labelsize=7)
             if has_vl:
                 vals = [v for v in value if v is not None]
                 t = [ts[i] for i, v in enumerate(value) if v is not None]
-                ax2 = ax.twinx()
-                ax2.plot(t, vals, color="royalblue", linewidth=1.5, alpha=0.7, label="Value Loss")
-                ax2.set_ylabel("Value Loss", color="royalblue", fontsize=8)
-                ax2.tick_params(axis='y', labelcolor="royalblue", labelsize=7)
+                self.ax_loss2.plot(t, vals, color="royalblue", linewidth=1.5, alpha=0.7, label="Value")
+                self.ax_loss2.set_ylabel("Value", color="royalblue", fontsize=8)
+                self.ax_loss2.tick_params(axis='y', labelcolor="royalblue", labelsize=7)
 
-            ax.legend(loc="upper left", fontsize=7)
-            if has_critic or has_vl:
-                ax2.legend(loc="upper right", fontsize=7)
+            lines1, labels1 = ax.get_legend_handles_labels()
+            lines2, labels2 = self.ax_loss2.get_legend_handles_labels()
+            if lines1 or lines2:
+                ax.legend(lines1 + lines2, labels1 + labels2, loc="upper right", fontsize=7)
         else:
             ax.text(0.5, 0.5, "Waiting for loss data...",
                     ha="center", va="center", transform=ax.transAxes)
         ax.set_xlim(left=0)
         ax.set_xlabel("Timesteps")
-        ax.set_ylabel("Actor Loss", color="crimson", fontsize=8)
+        ax.set_ylabel("Actor", color="crimson", fontsize=8)
         ax.tick_params(axis='y', labelcolor="crimson", labelsize=7)
         ax.set_title("Actor / Critic Loss")
         ax.grid(True, alpha=0.3)
