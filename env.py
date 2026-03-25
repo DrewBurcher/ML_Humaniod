@@ -223,9 +223,9 @@ class T1WalkingEnv(gym.Env):
         # 2. Survival bonus
         survival = w["survival"]
 
-        # 3. Energy penalty (sum of |torque * joint_velocity|)
+        # 3. Energy penalty (average power per joint, not total)
         joint_vel = state["joint-velocity"][self.actuated_indices]
-        energy = np.sum(np.abs(torques * joint_vel))
+        energy = np.mean(np.abs(torques * joint_vel))
         energy_pen = w["energy_penalty"] * energy
 
         # 4. Orientation penalty (keep torso upright)
