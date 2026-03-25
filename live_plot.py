@@ -23,17 +23,36 @@ import pandas as pd
 
 
 def read_monitor_csv(run_dir):
+    """Read all monitor CSVs (current + previous sessions) and concatenate."""
     import glob
-    path = os.path.join(run_dir, "monitor.monitor.csv")
-    if not os.path.exists(path):
+    dfs = []
+    # Load archived sessions first (sorted by name = chronological)
+    archives = sorted(glob.glob(os.path.join(run_dir, "monitor_session_*.csv")))
+    for path in archives:
+        try:
+            df = pd.read_csv(path, skiprows=1)
+            if len(df) > 0:
+                dfs.append(df)
+        except Exception:
+            pass
+    # Load current session
+    current = os.path.join(run_dir, "monitor.monitor.csv")
+    if not os.path.exists(current):
         candidates = glob.glob(os.path.join(run_dir, "*.monitor.csv"))
-        if not candidates:
-            return None
-        path = candidates[0]
-    try:
-        return pd.read_csv(path, skiprows=1)
-    except Exception:
+        candidates = [c for c in candidates if "session_" not in c]
+        if candidates:
+            current = candidates[0]
+    if os.path.exists(current):
+        try:
+            df = pd.read_csv(current, skiprows=1)
+            if len(df) > 0:
+                dfs.append(df)
+        except Exception:
+            pass
+    if not dfs:
         return None
+    combined = pd.concat(dfs, ignore_index=True)
+    return combined
 
 
 def load_eval(run_dir):
@@ -80,6 +99,8 @@ COMPONENT_LABELS = {
     "energy_penalty": "Energy",
     "orientation_penalty": "Orientation",
     "joint_limit_penalty": "Joint Limits",
+    "height_reward": "Height",
+    "z_fall_penalty": "Z Fall",
 }
 
 COMPONENT_COLORS = {
@@ -88,6 +109,8 @@ COMPONENT_COLORS = {
     "energy_penalty": "#e74c3c",
     "orientation_penalty": "#e67e22",
     "joint_limit_penalty": "#9b59b6",
+    "height_reward": "#1abc9c",
+    "z_fall_penalty": "#c0392b",
 }
 
 
@@ -466,7 +489,7 @@ class Dashboard:
 
     def run(self):
         self.update()
-        timer = self.fig.canvas.new_timer(interval=2000)
+        timer = self.fig.canvas.new_timer(interval=1000)
         timer.add_callback(self.update)
         timer.start()
         plt.show()

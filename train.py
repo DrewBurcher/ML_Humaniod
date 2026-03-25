@@ -305,6 +305,23 @@ def train(algo_name, total_timesteps, run_name, reward_weights=None,
                          else final_model_path)
         print(f"\n[Resume] Loading model from: {model_to_load}")
 
+        # Archive current monitor CSV so dashboard can show all sessions
+        import glob
+        monitor_files = glob.glob(os.path.join(log_dir, "*.monitor.csv"))
+        monitor_files = [f for f in monitor_files if "session_" not in f]
+        existing_archives = glob.glob(os.path.join(log_dir, "monitor_session_*.csv"))
+        next_session = len(existing_archives) + 1
+        for mf in monitor_files:
+            archive_name = os.path.join(log_dir, f"monitor_session_{next_session:03d}.csv")
+            try:
+                import shutil
+                shutil.copy2(mf, archive_name)
+                os.remove(mf)
+                print(f"[Resume] Archived monitor CSV → {archive_name}")
+            except Exception:
+                pass
+            next_session += 1
+
     # Write a render flag file — dashboard can toggle this
     render_flag_path = os.path.join(log_dir, ".render_on")
     with open(render_flag_path, "w") as f:
