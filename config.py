@@ -16,7 +16,7 @@ ENV_CONFIG = {
 REWARD_WEIGHTS = {
     "forward_velocity": 1.0,       # Reward for moving toward target speed
     "survival": 2.0,               # Bonus each timestep for staying alive
-    "energy_penalty": -0.01,       # Penalty per avg power (mean |torque*vel|)
+    "energy_penalty": -0.0033,     # Penalty per avg power (mean |torque*vel|)
     "fall_penalty": -100.0,        # Large penalty for falling (must outweigh dying-early exploit)
     "orientation_penalty": -0.3,   # Penalty for torso tilt
     "joint_limit_penalty": -0.1,   # Penalty for approaching joint limits
