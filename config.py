@@ -13,12 +13,12 @@ ENV_CONFIG = {
 
 # ── Reward weights (tunable) ─────────────────────────────────────────────────
 REWARD_WEIGHTS = {
-    "forward_velocity": 1.5,       # Linear reward on v_x (grows without bound)
+    "forward_velocity": 3.0,        # Linear reward on v_x (grows without bound)
     "survival": 2.0,               # Bonus each timestep for staying alive
-    "energy_penalty": -0.0033,     # Penalty per avg power (mean |torque*vel|)
+    "energy_penalty": -0.0066,     # Penalty per avg power (mean |torque*vel|)
     "fall_penalty": -100.0,        # Large penalty for falling
     "orientation_penalty": -1.0,   # Penalty for torso tilt (quadratic on roll+pitch)
-    "joint_limit_penalty": -2.0,   # Gradual quadratic penalty past 50% of range
+    "joint_limit_penalty": -0.4,   # Gradual quadratic penalty past 50% of range
     "height_reward": 1.0,          # Reward for maintaining torso height near initial
     "z_velocity_penalty": -0.5,    # Penalty for downward z velocity: max(-z_dot, 0)
 }
