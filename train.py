@@ -324,6 +324,9 @@ class MetricsCallback(BaseCallback):
             try:
                 with open(self.metrics_path, "r") as f:
                     self._data = json.load(f)
+                # Restore episode count so numbers don't restart and overlap
+                if self._data["reward_components"]:
+                    self._episode_count = self._data["reward_components"][-1]["episode"] + 1
             except Exception:
                 pass
 
