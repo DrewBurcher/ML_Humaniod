@@ -12,13 +12,13 @@ import pybullet_data
 import os
 
 from robot import T1
-from config import ENV_CONFIG, REWARD_WEIGHTS, ACTUATED_JOINT_INDICES
+from config import ENV_CONFIG, REWARD_WEIGHTS, ACTUATED_JOINT_INDICES, ARM_JOINT_INDICES
 
 
 class T1WalkingEnv(gym.Env):
     metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 30}
 
-    def __init__(self, render_mode=None, reward_weights=None):
+    def __init__(self, render_mode=None, reward_weights=None, mask_arms=False):
         super().__init__()
 
         self.render_mode = render_mode
@@ -26,6 +26,15 @@ class T1WalkingEnv(gym.Env):
         self.reward_weights = reward_weights if reward_weights is not None else REWARD_WEIGHTS
         self.actuated_indices = ACTUATED_JOINT_INDICES
         self.num_actuated = len(self.actuated_indices)
+
+        # Curriculum: when True, arm action components are overridden to hold
+        # arms at their neutral (zero) position. Used for phase-1 training.
+        self.mask_arms = mask_arms
+        # Indices *within the action vector* that correspond to arm joints.
+        self._arm_action_indices = [
+            i for i, idx in enumerate(self.actuated_indices)
+            if idx in ARM_JOINT_INDICES
+        ]
 
         # Physics sub-steps per policy step
         self.sim_steps_per_action = self.cfg["control_freq"] // self.cfg["policy_freq"]
@@ -47,6 +56,10 @@ class T1WalkingEnv(gym.Env):
         self.plane = None
         self.step_count = 0
         self.prev_x = 0.0
+
+    def set_mask_arms(self, mask):
+        """Enable/disable curriculum arm masking (callable from VecEnv.env_method)."""
+        self.mask_arms = bool(mask)
 
     def _is_connected(self):
         """Check if the physics client is still alive."""
@@ -120,18 +133,6 @@ class T1WalkingEnv(gym.Env):
             forces=max_forces,
             physicsClientId=self.client)
 
-        # Also lock arm joints in place (they're not actuated but shouldn't ragdoll)
-        from config import ARM_JOINT_INDICES
-        if ARM_JOINT_INDICES:
-            arm_forces = self.robot.joint_max_torque[ARM_JOINT_INDICES].tolist()
-            p.setJointMotorControlArray(
-                self.robot.robot, ARM_JOINT_INDICES, p.POSITION_CONTROL,
-                targetPositions=[0.0] * len(ARM_JOINT_INDICES),
-                positionGains=[0.5] * len(ARM_JOINT_INDICES),
-                velocityGains=[1.0] * len(ARM_JOINT_INDICES),
-                forces=arm_forces,
-                physicsClientId=self.client)
-
         for _ in range(10):
             p.stepSimulation(physicsClientId=self.client)
 
@@ -166,10 +167,14 @@ class T1WalkingEnv(gym.Env):
 
         action = np.clip(action, -1.0, 1.0)
 
-        # Scale normalized actions [-1, 1] to target joint positions within limits
+        # Curriculum phase 1: mask arm actions → hold arms at neutral (zero) position.
+        # The network still outputs 21 actions; we just override the arm components.
         target_positions = self._joint_mid + action * self._joint_range
+        if self.mask_arms and self._arm_action_indices:
+            for i in self._arm_action_indices:
+                target_positions[i] = 0.0  # override to physical zero, not joint midpoint
 
-        # Apply position control with limited forces
+        # Apply position control with limited forces (covers all 21 actuated joints)
         max_forces = self.robot.joint_max_torque[self.actuated_indices].tolist()
         try:
             p.setJointMotorControlArray(
@@ -179,18 +184,6 @@ class T1WalkingEnv(gym.Env):
                 velocityGains=[0.5] * self.num_actuated,
                 forces=max_forces,
                 physicsClientId=self.client)
-
-            # Keep arms locked in place (not actuated by policy)
-            from config import ARM_JOINT_INDICES
-            if ARM_JOINT_INDICES:
-                arm_forces = self.robot.joint_max_torque[ARM_JOINT_INDICES].tolist()
-                p.setJointMotorControlArray(
-                    self.robot.robot, ARM_JOINT_INDICES, p.POSITION_CONTROL,
-                    targetPositions=[0.0] * len(ARM_JOINT_INDICES),
-                    positionGains=[0.5] * len(ARM_JOINT_INDICES),
-                    velocityGains=[1.0] * len(ARM_JOINT_INDICES),
-                    forces=arm_forces,
-                    physicsClientId=self.client)
 
             for _ in range(self.sim_steps_per_action):
                 p.stepSimulation(physicsClientId=self.client)
@@ -248,12 +241,11 @@ class T1WalkingEnv(gym.Env):
     def _compute_reward(self, state, torques):
         w = self.reward_weights
 
-        # 1. Forward velocity reward (x-direction)
+        # 1. Forward velocity reward — linear in v_x, grows without bound.
+        #    Goal: push the robot to walk as fast as possible.
         current_x = state["base-position"][0]
         forward_vel = (current_x - self.prev_x) * self.cfg["policy_freq"]
-        target_speed = self.cfg["target_speed"]
-        # Reward is higher when forward_vel is close to target_speed
-        vel_reward = w["forward_velocity"] * np.exp(-2.0 * (forward_vel - target_speed) ** 2)
+        vel_reward = w["forward_velocity"] * forward_vel
 
         # 2. Survival bonus
         survival = w["survival"]
@@ -285,13 +277,13 @@ class T1WalkingEnv(gym.Env):
         # Gaussian reward centered on initial height, drops off as it deviates
         height_rew = w.get("height_reward", 0) * np.exp(-5.0 * (torso_z - target_z) ** 2)
 
-        # 7. Z fall velocity penalty: penalize downward velocity only
+        # 7. Z-velocity penalty: penalize upward z velocity — max(z_dot, 0).
+        #    Discourages hopping/launching; coefficient is negative so reward is negative.
         z_vel = state["base-linear-velocity"][2]
-        # Only penalize negative (falling) z velocity, ignore upward
-        z_fall_pen = w.get("z_fall_velocity_penalty", 0) * max(-z_vel, 0.0)
+        z_vel_pen = w.get("z_velocity_penalty", 0) * max(z_vel, 0.0)
 
         total_reward = (vel_reward + survival + energy_pen + orientation_pen
-                        + limit_pen + height_rew + z_fall_pen)
+                        + limit_pen + height_rew + z_vel_pen)
 
         reward_info = {
             "velocity_reward": vel_reward,
@@ -300,7 +292,7 @@ class T1WalkingEnv(gym.Env):
             "orientation_penalty": orientation_pen,
             "joint_limit_penalty": limit_pen,
             "height_reward": height_rew,
-            "z_fall_penalty": z_fall_pen,
+            "z_velocity_penalty": z_vel_pen,
             "forward_vel": forward_vel,
         }
         return total_reward, reward_info

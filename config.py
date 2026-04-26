@@ -9,19 +9,18 @@ ENV_CONFIG = {
     "max_episode_steps": 1000,     # Steps per episode at policy_freq (~33 s)
     "initial_height": 0.85,        # Base spawn height (m)
     "fall_threshold": 0.35,        # Torso z below this → fallen (m)
-    "target_speed": 0.5,           # Desired forward speed (m/s)
 }
 
 # ── Reward weights (tunable) ─────────────────────────────────────────────────
 REWARD_WEIGHTS = {
-    "forward_velocity": 1.5,       # Reward for moving toward target speed (1.5x)
+    "forward_velocity": 1.5,       # Linear reward on v_x (grows without bound)
     "survival": 2.0,               # Bonus each timestep for staying alive
     "energy_penalty": -0.0033,     # Penalty per avg power (mean |torque*vel|)
     "fall_penalty": -100.0,        # Large penalty for falling
     "orientation_penalty": -1.0,   # Penalty for torso tilt (quadratic on roll+pitch)
     "joint_limit_penalty": -2.0,   # Gradual quadratic penalty past 50% of range
     "height_reward": 1.0,          # Reward for maintaining torso height near initial
-    "z_fall_velocity_penalty": -0.5,  # Penalty for downward z velocity (don't reward upward)
+    "z_velocity_penalty": -0.5,    # Penalty for upward z velocity: max(z_dot, 0)
 }
 
 # ── PPO hyperparameters ──────────────────────────────────────────────────────
@@ -70,5 +69,7 @@ ARM_JOINT_INDICES = [
     6, 7, 8, 9,    # Right arm
 ]
 
-# Active actuated joints — legs only for now (arms added later)
-ACTUATED_JOINT_INDICES = LEG_JOINT_INDICES
+# Active actuated joints — waist + both legs + both arms (21 joints).
+# Head joints (0, 1) are held fixed. During curriculum phase 1, arm joint
+# actions are masked to zero in env.py so the robot learns to stand first.
+ACTUATED_JOINT_INDICES = LEG_JOINT_INDICES + ARM_JOINT_INDICES

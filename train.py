@@ -133,13 +133,142 @@ def _save_run_metadata(log_dir, algo_name, total_timesteps, reward_weights,
 
 # ── Environment factory ──────────────────────────────────────────────────────
 
-def make_env(render_mode=None, reward_weights=None, monitor_dir=None):
+def make_env(render_mode=None, reward_weights=None, monitor_dir=None, mask_arms=False):
     def _init():
         e = gym.make("T1Walking-v0", render_mode=render_mode,
-                      reward_weights=reward_weights)
+                     reward_weights=reward_weights, mask_arms=mask_arms)
         e = Monitor(e, filename=os.path.join(monitor_dir, "monitor") if monitor_dir else None)
         return e
     return _init
+
+
+# ── Video eval callback ──────────────────────────────────────────────────────
+
+class VideoEvalCallback(EvalCallback):
+    """EvalCallback that also records one rgb_array episode per eval checkpoint.
+
+    Saves to <log_dir>/videos/eval_step_XXXXXXX.mp4 (or .gif if ffmpeg missing).
+    Recording runs on a separate headless rgb_array env so the GUI isn't affected.
+    """
+
+    def __init__(self, *args, video_dir: str = "", fps: int = 30,
+                 video_freq: int = 100_000, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.video_dir = video_dir
+        self.fps = fps
+        self.video_freq = video_freq
+        os.makedirs(video_dir, exist_ok=True)
+        self._video_env = None  # created lazily on first eval
+
+    def _init_video_env(self):
+        """Build a headless rgb_array env with the same VecNormalize stats."""
+        import env as _env_reg  # noqa — ensures T1Walking-v0 is registered
+        rec_env = DummyVecEnv([lambda: gym.make("T1Walking-v0", render_mode="rgb_array")])
+        # Clone normalisation stats from the eval env (read-only, no reward norm)
+        rec_env = VecNormalize(rec_env, norm_obs=True, norm_reward=False,
+                               clip_obs=10.0, training=False)
+        if hasattr(self.eval_env, "obs_rms"):
+            rec_env.obs_rms = self.eval_env.obs_rms
+            rec_env.ret_rms = self.eval_env.ret_rms
+        self._video_env = rec_env
+
+    def _on_step(self) -> bool:
+        result = super()._on_step()
+        # EvalCallback sets self.last_mean_reward after each eval round.
+        # We piggyback: record whenever an eval just finished.
+        if self.eval_freq > 0 and self.n_calls % self.eval_freq == 0:
+            if self.num_timesteps % self.video_freq == 0:
+                self._record_episode()
+        return result
+
+    def _record_episode(self):
+        try:
+            if self._video_env is None:
+                self._init_video_env()
+
+            # Sync normalisation stats in case they've updated since last eval
+            if hasattr(self.eval_env, "obs_rms"):
+                self._video_env.obs_rms = self.eval_env.obs_rms
+
+            frames = []
+            obs = self._video_env.reset()
+            done = False
+            while not done:
+                action, _ = self.model.predict(obs, deterministic=True)
+                obs, _, dones, _ = self._video_env.step(action)
+                done = dones[0]
+                frame = self._video_env.envs[0].render()
+                if frame is not None:
+                    frames.append(frame)
+
+            if not frames:
+                return
+
+            step_tag = f"{self.num_timesteps:07d}"
+            vid_path = os.path.join(self.video_dir, f"eval_step_{step_tag}.mp4")
+            self._save_video(frames, vid_path)
+        except Exception as e:
+            print(f"[VideoEval] Warning: recording failed: {e}")
+
+    def _save_video(self, frames, path):
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+        from matplotlib.animation import FuncAnimation, FFMpegWriter
+
+        fig, ax = plt.subplots(figsize=(8, 6))
+        ax.axis("off")
+        im = ax.imshow(frames[0])
+
+        def update(i):
+            im.set_array(frames[i])
+            return [im]
+
+        anim = FuncAnimation(fig, update, frames=len(frames),
+                             interval=1000 // self.fps, blit=True)
+        try:
+            anim.save(path, writer=FFMpegWriter(fps=self.fps))
+            print(f"[VideoEval] Saved: {os.path.basename(path)}")
+        except Exception:
+            gif = path.replace(".mp4", ".gif")
+            anim.save(gif, writer="pillow", fps=self.fps)
+            print(f"[VideoEval] Saved (GIF): {os.path.basename(gif)}")
+        plt.close(fig)
+
+    def __del__(self):
+        if self._video_env is not None:
+            try:
+                self._video_env.close()
+            except Exception:
+                pass
+
+
+# ── Curriculum callback ──────────────────────────────────────────────────────
+
+class CurriculumCallback(BaseCallback):
+    """Unlocks arm joints at a given timestep (phase 1 → phase 2 transition).
+
+    During phase 1 the env masks arm actions, holding arms at their neutral
+    position so the network learns to balance/walk with fewer DOF. At
+    `switch_at_timestep` we call set_mask_arms(False) on every env so the
+    full 21-DOF policy takes over for phase 2.
+    """
+
+    def __init__(self, switch_at_timestep: int, verbose=0):
+        super().__init__(verbose)
+        self.switch_at = switch_at_timestep
+        self.switched = False
+
+    def _on_step(self) -> bool:
+        if not self.switched and self.num_timesteps >= self.switch_at:
+            try:
+                self.training_env.env_method("set_mask_arms", False)
+                self.switched = True
+                print(f"\n[Curriculum] Phase 2 — arms unlocked at "
+                      f"timestep {self.num_timesteps:,}")
+            except Exception as e:
+                print(f"[Curriculum] Warning: could not unlock arms: {e}")
+        return True
 
 
 # ── Camera follow callback ───────────────────────────────────────────────────
@@ -273,7 +402,8 @@ class PeriodicSaveCallback(BaseCallback):
 # ── Main train function ─────────────────────────────────────────────────────
 
 def train(algo_name, total_timesteps, run_name, reward_weights=None,
-          live_plot=True, resume=False, headless=False):
+          live_plot=True, resume=False, headless=False,
+          mask_arms=False, curriculum_step=None, record_evals=False):
     log_dir = os.path.join("runs", run_name)
     os.makedirs(log_dir, exist_ok=True)
     model_dir = os.path.join(log_dir, "models")
@@ -322,7 +452,7 @@ def train(algo_name, total_timesteps, run_name, reward_weights=None,
     # ── Create environments ──
     render = None if headless else "human"
     train_env = DummyVecEnv([make_env(render_mode=render, reward_weights=rw,
-                                       monitor_dir=log_dir)])
+                                      monitor_dir=log_dir, mask_arms=mask_arms)])
 
     if can_resume and os.path.exists(vecnorm_path):
         print(f"[Resume] Loading VecNormalize from: {vecnorm_path}")
@@ -334,7 +464,8 @@ def train(algo_name, total_timesteps, run_name, reward_weights=None,
                                  clip_obs=10.0)
 
     # Eval env: headless
-    eval_env = DummyVecEnv([make_env(reward_weights=rw, monitor_dir=None)])
+    # Eval env always runs with arms unmasked (measure full-policy performance)
+    eval_env = DummyVecEnv([make_env(reward_weights=rw, monitor_dir=None, mask_arms=False)])
     eval_env = VecNormalize(eval_env, norm_obs=True, norm_reward=False,
                             clip_obs=10.0, training=False)
 
@@ -375,7 +506,16 @@ def train(algo_name, total_timesteps, run_name, reward_weights=None,
         total_timesteps = cfg_ref["total_timesteps"]
 
     # ── Callbacks ──
-    eval_callback = EvalCallback(
+    video_dir = os.path.join(log_dir, "videos")
+    eval_callback = VideoEvalCallback(
+        eval_env,
+        best_model_save_path=os.path.join(log_dir, "best_model"),
+        log_path=os.path.join(log_dir, "eval_logs"),
+        eval_freq=eval_freq,
+        n_eval_episodes=5,
+        deterministic=True,
+        video_dir=video_dir if record_evals else "",
+    ) if record_evals else EvalCallback(
         eval_env,
         best_model_save_path=os.path.join(log_dir, "best_model"),
         log_path=os.path.join(log_dir, "eval_logs"),
@@ -396,10 +536,19 @@ def train(algo_name, total_timesteps, run_name, reward_weights=None,
     camera_callback = CameraFollowCallback(render_flag_path=render_flag_path)
     metrics_callback = MetricsCallback(log_dir=log_dir, save_freq=100)
 
-    callbacks = CallbackList([
-        eval_callback, checkpoint_callback, save_callback,
-        camera_callback, metrics_callback
-    ])
+    cb_list = [eval_callback, checkpoint_callback, save_callback,
+               camera_callback, metrics_callback]
+
+    # Curriculum: auto-unlock arms mid-run when --curriculum N is set
+    if curriculum_step is not None:
+        cb_list.append(CurriculumCallback(switch_at_timestep=curriculum_step))
+        phase_msg = f"Curriculum: arms locked until step {curriculum_step:,}"
+    elif mask_arms:
+        phase_msg = "Phase 1: arms masked (run again with --phase 2 to unlock)"
+    else:
+        phase_msg = "Arms fully actuated"
+
+    callbacks = CallbackList(cb_list)
 
     # ── Save metadata ──
     meta = _save_run_metadata(
@@ -464,6 +613,7 @@ def train(algo_name, total_timesteps, run_name, reward_weights=None,
     print(f"  Run: {run_name}  |  Log dir: {log_dir}")
     print(f"  Git: {git_short}")
     print(f"  PyBullet GUI: {gui_status}  |  Dashboard: {'OPEN' if live_plot else 'OFF'}")
+    print(f"  {phase_msg}")
     print(f"  Ctrl+C to pause and save for later resume")
     print(f"{'='*60}\n")
 
@@ -532,15 +682,29 @@ if __name__ == "__main__":
                         help="Disable live matplotlib dashboard")
     parser.add_argument("--headless", action="store_true",
                         help="No PyBullet GUI (faster, use with dashboard)")
+    parser.add_argument("--mask-arms", action="store_true",
+                        help="Phase 1: mask arm actions (arms held at zero). "
+                             "Resume without this flag for phase 2.")
+    parser.add_argument("--curriculum", type=int, default=None, metavar="N",
+                        help="Auto-unlock arms after N timesteps in a single run "
+                             "(e.g. --curriculum 1000000 with --timesteps 2000000)")
+    parser.add_argument("--record-evals", action="store_true",
+                        help="Record one mp4 per eval checkpoint to <run>/videos/")
     args = parser.parse_args()
 
     if args.resume:
         run_name = os.path.basename(args.resume.rstrip("/\\"))
         train(args.algo, args.timesteps, run_name,
               live_plot=not args.no_plot, resume=True,
-              headless=args.headless)
+              headless=args.headless,
+              mask_arms=args.mask_arms,
+              curriculum_step=args.curriculum,
+              record_evals=args.record_evals)
     else:
         if args.name is None:
             args.name = f"{args.algo}_{int(time.time())}"
         train(args.algo, args.timesteps, args.name,
-              live_plot=not args.no_plot, headless=args.headless)
+              live_plot=not args.no_plot, headless=args.headless,
+              mask_arms=args.mask_arms,
+              curriculum_step=args.curriculum,
+              record_evals=args.record_evals)

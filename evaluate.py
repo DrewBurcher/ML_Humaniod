@@ -21,6 +21,33 @@ import gymnasium as gym
 ALGO_MAP = {"ppo": PPO, "sac": SAC}
 
 
+def _save_video(frames, path, fps=30):
+    """Save a list of RGB frames to mp4 (falls back to GIF if ffmpeg missing)."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from matplotlib.animation import FuncAnimation, FFMpegWriter
+
+    fig, ax = plt.subplots(figsize=(8, 6))
+    ax.axis("off")
+    im = ax.imshow(frames[0])
+
+    def update(i):
+        im.set_array(frames[i])
+        return [im]
+
+    anim = FuncAnimation(fig, update, frames=len(frames), interval=1000 // fps, blit=True)
+    try:
+        writer = FFMpegWriter(fps=fps)
+        anim.save(path, writer=writer)
+        print(f"  Video saved: {path}")
+    except Exception:
+        gif_path = path.replace(".mp4", ".gif")
+        anim.save(gif_path, writer="pillow", fps=fps)
+        print(f"  GIF saved:   {gif_path}")
+    plt.close(fig)
+
+
 def load_model(run_dir, algo_name):
     """Load a trained model and its VecNormalize stats."""
     algo_cls = ALGO_MAP[algo_name]
@@ -34,11 +61,29 @@ def load_model(run_dir, algo_name):
     return model, vec_path
 
 
-def evaluate(run_dir, algo_name, n_episodes=10, render=False):
-    """Run evaluation episodes and collect metrics."""
+def evaluate(run_dir, algo_name, n_episodes=10, render=False, record=False):
+    """Run evaluation episodes and collect metrics.
+
+    Args:
+        record: If True, save an mp4 video of every episode to
+                <run_dir>/videos/eval_ep_NNN.mp4
+    """
     model, vec_path = load_model(run_dir, algo_name)
 
-    render_mode = "human" if render else None
+    # rgb_array needed for recording; human for live viewing; else headless
+    if record:
+        render_mode = "rgb_array"
+    elif render:
+        render_mode = "human"
+    else:
+        render_mode = None
+
+    video_dir = None
+    if record:
+        video_dir = os.path.join(run_dir, "videos")
+        os.makedirs(video_dir, exist_ok=True)
+        print(f"[Record] Saving episode videos to: {video_dir}")
+
     eval_env = DummyVecEnv([lambda: gym.make("T1Walking-v0", render_mode=render_mode)])
     if os.path.exists(vec_path):
         eval_env = VecNormalize.load(vec_path, eval_env)
@@ -60,6 +105,7 @@ def evaluate(run_dir, algo_name, n_episodes=10, render=False):
         ep_energy = 0.0
         ep_steps = 0
         ep_components = []
+        frames = []
 
         while not done:
             action, _ = model.predict(obs, deterministic=True)
@@ -68,6 +114,11 @@ def evaluate(run_dir, algo_name, n_episodes=10, render=False):
 
             ep_reward += reward[0]
             ep_steps += 1
+
+            if record:
+                frame = eval_env.envs[0].render()
+                if frame is not None:
+                    frames.append(frame)
 
             info = infos[0]
             if "reward_info" in info:
@@ -92,6 +143,10 @@ def evaluate(run_dir, algo_name, n_episodes=10, render=False):
         print(f"Episode {ep+1}/{n_episodes}: "
               f"reward={ep_reward:.2f}, dist={x_dist:.2f}m, "
               f"steps={ep_steps}, energy={ep_energy:.2f}")
+
+        if record and frames:
+            vid_path = os.path.join(video_dir, f"eval_ep_{ep+1:03d}.mp4")
+            _save_video(frames, vid_path)
 
     eval_env.close()
 
@@ -158,7 +213,10 @@ if __name__ == "__main__":
     parser.add_argument("--algo", type=str, nargs="+", choices=["ppo", "sac"],
                         help="Algorithm(s)")
     parser.add_argument("--episodes", type=int, default=10)
-    parser.add_argument("--render", action="store_true")
+    parser.add_argument("--render", action="store_true",
+                        help="Show live PyBullet GUI during evaluation")
+    parser.add_argument("--record", action="store_true",
+                        help="Save an mp4 of every episode to <run>/videos/")
     parser.add_argument("--compare", type=str, nargs="+",
                         help="Paths to run directories for comparison")
     args = parser.parse_args()
@@ -167,6 +225,6 @@ if __name__ == "__main__":
         compare(args.compare, args.algo)
     elif args.run and args.algo:
         evaluate(args.run, args.algo[0], n_episodes=args.episodes,
-                 render=args.render)
+                 render=args.render, record=args.record)
     else:
         parser.print_help()
