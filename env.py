@@ -280,7 +280,7 @@ class T1WalkingEnv(gym.Env):
         # 7. Z-velocity penalty: penalize upward z velocity — max(z_dot, 0).
         #    Discourages hopping/launching; coefficient is negative so reward is negative.
         z_vel = state["base-linear-velocity"][2]
-        z_vel_pen = w.get("z_velocity_penalty", 0) * max(z_vel, 0.0)
+        z_vel_pen = w.get("z_velocity_penalty", 0) * max(-z_vel, 0.0)
 
         total_reward = (vel_reward + survival + energy_pen + orientation_pen
                         + limit_pen + height_rew + z_vel_pen)

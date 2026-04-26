@@ -20,7 +20,7 @@ REWARD_WEIGHTS = {
     "orientation_penalty": -1.0,   # Penalty for torso tilt (quadratic on roll+pitch)
     "joint_limit_penalty": -2.0,   # Gradual quadratic penalty past 50% of range
     "height_reward": 1.0,          # Reward for maintaining torso height near initial
-    "z_velocity_penalty": -0.5,    # Penalty for upward z velocity: max(z_dot, 0)
+    "z_velocity_penalty": -0.5,    # Penalty for downward z velocity: max(-z_dot, 0)
 }
 
 # ── PPO hyperparameters ──────────────────────────────────────────────────────

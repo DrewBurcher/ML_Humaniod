@@ -334,19 +334,29 @@ class MetricsCallback(BaseCallback):
             ri = info.get("reward_info", {})
             for k, v in ri.items():
                 if k == "forward_vel":
-                    continue  # not a reward component
-                self._reward_components[k] = self._reward_components.get(k, 0) + abs(float(v))
+                    # Track forward velocity separately (not abs, and it's a mean not sum)
+                    self._reward_components["_fvel_sum"] = (
+                        self._reward_components.get("_fvel_sum", 0) + float(v))
+                else:
+                    self._reward_components[k] = self._reward_components.get(k, 0) + abs(float(v))
             self._reward_components["_steps"] = self._reward_components.get("_steps", 0) + 1
 
             # Episode ended
             if info.get("episode"):
                 steps = max(self._reward_components.pop("_steps", 1), 1)
+                fvel_sum = self._reward_components.pop("_fvel_sum", 0.0)
                 entry = {
                     "episode": self._episode_count,
                     "timestep": int(self.num_timesteps),
+                    "forward_vel_mean": round(fvel_sum / steps, 4),
+                    "x_distance": round(float(info.get("x_distance", 0.0)), 4),
                 }
                 for k, v in self._reward_components.items():
                     entry[k] = round(v / steps, 4)  # per-step average
+                # Energy per meter (avoid div/0)
+                dist = max(abs(entry["x_distance"]), 0.01)
+                entry["energy_per_meter"] = round(
+                    entry.get("energy_penalty", 0.0) * steps / dist, 4)
                 self._data["reward_components"].append(entry)
                 self._reward_components = {}
                 self._episode_count += 1
