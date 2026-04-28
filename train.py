@@ -273,6 +273,35 @@ class CurriculumCallback(BaseCallback):
 
 # ── Camera follow callback ───────────────────────────────────────────────────
 
+class PauseCallback(BaseCallback):
+    """Blocks the training loop while .paused flag file contains '1'."""
+
+    def __init__(self, pause_flag_path="", verbose=0):
+        super().__init__(verbose)
+        self.pause_flag_path = pause_flag_path
+        self._was_paused = False
+
+    def _on_step(self) -> bool:
+        if not self.pause_flag_path:
+            return True
+        while True:
+            try:
+                with open(self.pause_flag_path, "r") as f:
+                    paused = f.read().strip() == "1"
+            except Exception:
+                paused = False
+            if not paused:
+                if self._was_paused:
+                    print("[Pause] Resumed.")
+                    self._was_paused = False
+                return True
+            if not self._was_paused:
+                print(f"[Pause] Paused at timestep {self.num_timesteps:,}. "
+                      f"Click Resume in dashboard to continue.")
+                self._was_paused = True
+            time.sleep(0.5)
+
+
 class CameraFollowCallback(BaseCallback):
     """Follows the robot with the PyBullet camera and handles render toggle."""
 
@@ -462,6 +491,11 @@ def train(algo_name, total_timesteps, run_name, reward_weights=None,
     with open(render_flag_path, "w") as f:
         f.write("1")
 
+    # Pause flag file — dashboard can toggle this
+    pause_flag_path = os.path.join(log_dir, ".paused")
+    with open(pause_flag_path, "w") as f:
+        f.write("0")
+
     # ── Create environments ──
     render = None if headless else "human"
     train_env = DummyVecEnv([make_env(render_mode=render, reward_weights=rw,
@@ -548,9 +582,10 @@ def train(algo_name, total_timesteps, run_name, reward_weights=None,
     )
     camera_callback = CameraFollowCallback(render_flag_path=render_flag_path)
     metrics_callback = MetricsCallback(log_dir=log_dir, save_freq=100)
+    pause_callback = PauseCallback(pause_flag_path=pause_flag_path)
 
     cb_list = [eval_callback, checkpoint_callback, save_callback,
-               camera_callback, metrics_callback]
+               camera_callback, metrics_callback, pause_callback]
 
     # Curriculum: auto-unlock arms mid-run when --curriculum N is set
     if curriculum_step is not None:

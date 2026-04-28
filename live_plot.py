@@ -118,8 +118,10 @@ class Dashboard:
     def __init__(self, run_dir):
         self.run_dir = run_dir
         self.render_flag_path = os.path.join(run_dir, ".render_on")
+        self.pause_flag_path = os.path.join(run_dir, ".paused")
         self.smooth_window = 20
         self.render_on = True
+        self.paused = False
         self._last_timesteps = 0
         self._last_time = time.time()
 
@@ -154,6 +156,11 @@ class Dashboard:
                                   color='lightgreen', hovercolor='palegreen')
         self.render_btn.on_clicked(self._toggle_render)
 
+        ax_pause_btn = self.fig.add_axes([0.16, 0.01, 0.08, 0.03])
+        self.pause_btn = Button(ax_pause_btn, 'Pause',
+                                 color='lightblue', hovercolor='lightcyan')
+        self.pause_btn.on_clicked(self._toggle_pause)
+
         ax_smooth = self.fig.add_axes([0.25, 0.015, 0.20, 0.02])
         self.smooth_slider = Slider(ax_smooth, 'Smooth', 1, 100,
                                      valinit=20, valstep=1)
@@ -181,6 +188,20 @@ class Dashboard:
         self.render_btn.label.set_text(label)
         self.render_btn.color = color
         self.render_btn.ax.set_facecolor(color)
+        self.fig.canvas.draw_idle()
+
+    def _toggle_pause(self, event):
+        self.paused = not self.paused
+        try:
+            with open(self.pause_flag_path, "w") as f:
+                f.write("1" if self.paused else "0")
+        except Exception:
+            pass
+        label = "Resume" if self.paused else "Pause"
+        color = "lightsalmon" if self.paused else "lightblue"
+        self.pause_btn.label.set_text(label)
+        self.pause_btn.color = color
+        self.pause_btn.ax.set_facecolor(color)
         self.fig.canvas.draw_idle()
 
     def _on_smooth_change(self, val):
