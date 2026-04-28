@@ -300,8 +300,11 @@ class T1WalkingEnv(gym.Env):
     def render(self):
         if self.render_mode == "rgb_array":
             width, height = 640, 480
+            base_pos, _ = p.getBasePositionAndOrientation(
+                self.robot.robot, physicsClientId=self.client)
+            target = [base_pos[0], base_pos[1], 1.0]
             view_matrix = p.computeViewMatrixFromYawPitchRoll(
-                cameraTargetPosition=[0, 0, 1], distance=3.0,
+                cameraTargetPosition=target, distance=3.0,
                 yaw=40, pitch=-20, roll=0, upAxisIndex=2,
                 physicsClientId=self.client)
             proj_matrix = p.computeProjectionMatrixFOV(
