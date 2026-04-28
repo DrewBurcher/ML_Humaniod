@@ -15,11 +15,10 @@ ENV_CONFIG = {
 REWARD_WEIGHTS = {
     "forward_velocity": 3.0,        # Linear reward on v_x (grows without bound)
     "survival": 2.0,               # Bonus each timestep for staying alive
-    "energy_penalty": -0.0066,     # Penalty per avg power (mean |torque*vel|)
+    "energy_penalty": -0.00495,    # Penalty per avg power (mean |torque*vel|)
     "fall_penalty": -100.0,        # Large penalty for falling
-    "orientation_penalty": -1.0,   # Penalty for torso tilt (quadratic on roll+pitch)
-    "joint_limit_penalty": -0.4,   # Gradual quadratic penalty past 50% of range
-    "height_reward": 1.0,          # Reward for maintaining torso height near initial
+    "orientation_penalty": -0.5,   # Penalty for torso tilt (quadratic on roll+pitch)
+    "joint_limit_penalty": -0.2,   # Gradual quadratic penalty past 50% of range
     "z_velocity_penalty": -0.5,    # Penalty for downward z velocity: max(-z_dot, 0)
 }
 
@@ -69,7 +68,9 @@ ARM_JOINT_INDICES = [
     6, 7, 8, 9,    # Right arm
 ]
 
-# Active actuated joints — waist + both legs + both arms (21 joints).
-# Head joints (0, 1) are held fixed. During curriculum phase 1, arm joint
-# actions are masked to zero in env.py so the robot learns to stand first.
-ACTUATED_JOINT_INDICES = LEG_JOINT_INDICES + ARM_JOINT_INDICES
+ANKLE_JOINT_INDICES = [15, 16, 21, 22]  # L/R Ankle_Pitch, L/R Ankle_Roll
+
+# Active actuated joints — waist + both legs only (13 joints).
+# Head joints (0, 1) and arm joints (2-9) are held fixed at zero in env.py
+# (passive position control), and are not exposed to the policy.
+ACTUATED_JOINT_INDICES = LEG_JOINT_INDICES
