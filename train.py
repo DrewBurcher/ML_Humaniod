@@ -570,6 +570,20 @@ def train(algo_name, total_timesteps, run_name, reward_weights=None,
         n_eval_episodes=5,
         deterministic=True,
     )
+
+    # Preserve eval history across resumes — SB3 otherwise overwrites the npz.
+    if can_resume:
+        prior_eval_path = os.path.join(log_dir, "eval_logs", "evaluations.npz")
+        if os.path.exists(prior_eval_path):
+            try:
+                prior = np.load(prior_eval_path)
+                eval_callback.evaluations_timesteps = prior["timesteps"].tolist()
+                eval_callback.evaluations_results = prior["results"].tolist()
+                eval_callback.evaluations_length = prior["ep_lengths"].tolist()
+                print(f"[Resume] Preserved {len(eval_callback.evaluations_timesteps)}"
+                      f" prior eval points")
+            except Exception as e:
+                print(f"[Resume] Warning: could not preload eval history: {e}")
     checkpoint_callback = CheckpointCallback(
         save_freq=50_000,
         save_path=model_dir,
