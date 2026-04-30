@@ -157,6 +157,7 @@ class VideoEvalCallback(EvalCallback):
         self.video_dir = video_dir
         self.fps = fps
         self.video_freq = video_freq
+        self._last_video_step = 0   # tracks last recorded floor(num_timesteps/video_freq)
         os.makedirs(video_dir, exist_ok=True)
         self._video_env = None  # created lazily on first eval
 
@@ -175,9 +176,11 @@ class VideoEvalCallback(EvalCallback):
     def _on_step(self) -> bool:
         result = super()._on_step()
         # EvalCallback sets self.last_mean_reward after each eval round.
-        # We piggyback: record whenever an eval just finished.
+        # Record whenever num_timesteps crosses a video_freq boundary.
         if self.eval_freq > 0 and self.n_calls % self.eval_freq == 0:
-            if self.num_timesteps % self.video_freq == 0:
+            current_bucket = self.num_timesteps // self.video_freq
+            if current_bucket > self._last_video_step:
+                self._last_video_step = current_bucket
                 self._record_episode()
         return result
 
