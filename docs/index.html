@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bipedal Robotic Locomotion with Reinforcement Learning</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="hero">
+  <div class="container">
+    <h1>Bipedal Robotic Locomotion<br>with Reinforcement Learning</h1>
+    <p class="authors">
+      <a href="#">Drew Burcher</a> &middot;
+      <a href="#">Dan Torri</a> &middot;
+      <a href="#">Nathan Wyatt</a>
+    </p>
+    <p class="affiliation">Virginia Tech &mdash; CS 5824 / ECE 5424 Machine Learning, Spring 2026</p>
+
+    <div class="actions">
+      <a class="btn" href="paper.pdf"><span>&#128196;</span> Paper (PDF)</a>
+      <a class="btn" href="slides.pdf"><span>&#128202;</span> Slides (PDF)</a>
+      <a class="btn" href="https://github.com/DrewBurcher/ML_Humaniod"><span>&lt;/&gt;</span> Code</a>
+      <a class="btn" href="#video"><span>&#9654;</span> Video</a>
+    </div>
+  </div>
+</header>
+
+<main class="container">
+
+  <section id="teaser">
+    <figure>
+      <img src="assets/final_gait.gif" alt="Final SAC walking gait at 2.8M timesteps">
+      <figcaption>Final SAC policy after ~2.8M environment steps. Walking speed ~1.6 m/s.</figcaption>
+    </figure>
+  </section>
+
+  <section id="abstract">
+    <h2>Abstract</h2>
+    <p>
+      We train a 13-degree-of-freedom bipedal humanoid (Booster Robotics T1) to walk
+      forward in a PyBullet simulation using two model-free reinforcement-learning
+      algorithms: Soft Actor&ndash;Critic (SAC) and Proximal Policy Optimization (PPO).
+      The policy is a two-layer MLP that maps proprioceptive observations to per-joint
+      position targets, and a hand-shaped reward combines forward velocity, an alive
+      bonus, an energy cost, and several stability penalties.
+    </p>
+    <p>
+      After roughly 2.8M environment steps the SAC policy reaches a mean evaluation
+      return of about 7,100 and a forward speed of ~1.6 m/s. PPO under several reward
+      variants plateaus near a return of 3,000 and never produces a sustained gait.
+      We discuss the reward-shaping decisions that drove these results, the
+      catastrophic-forgetting failures we saw with SAC late in training, and the
+      practical trade-offs between on- and off-policy methods on a dense-reward
+      locomotion task.
+    </p>
+  </section>
+
+  <section id="problem">
+    <h2>Problem</h2>
+    <p>
+      Bipedal walking is high-dimensional, underactuated, and unstable in its
+      natural rest state &mdash; small mistakes early in a step cascade into a fall.
+      Classical zero-moment-point and model-predictive controllers work well when
+      the dynamics model is accurate, but they require significant tuning and do not
+      generalize easily. We study whether two off-the-shelf deep-RL algorithms can
+      learn a stable forward gait from scratch on the T1 humanoid using only
+      proprioceptive state and a dense, hand-shaped reward, and we compare them on
+      sample efficiency, wall-clock training time, final performance, and stability
+      of the learned policy.
+    </p>
+  </section>
+
+  <section id="method">
+    <h2>Method</h2>
+    <h3>Robot &amp; simulator</h3>
+    <p>
+      The Booster Robotics T1 is a 1.2 m, 23-joint humanoid loaded into PyBullet
+      via URDF. Physics runs at 240 Hz, the policy at 60 Hz. Head joints are locked
+      and arm joints are held at zero with a stiff position controller, leaving
+      <strong>13 actuated joints</strong> (waist + 6 per leg) under policy control.
+      Episodes terminate if the torso drops below 0.35 m, rises above 2 m, or
+      tilts more than ~70&deg;.
+    </p>
+
+    <h3>Observation &amp; action</h3>
+    <ul>
+      <li><strong>Observation (36-D):</strong> torso height, Euler orientation,
+        linear and angular velocity, plus 13 joint positions and 13 joint velocities.</li>
+      <li><strong>Action (13-D):</strong> normalized joint targets in [&minus;1, 1],
+        applied via PD position control. Ankles use softer/more damped gains to
+        suppress foot-chatter.</li>
+    </ul>
+
+    <h3>Reward</h3>
+    <pre>r = 3.0 &middot; v_x                  // forward velocity
+  + 2.0                          // alive bonus
+  &minus; 0.00495 &middot; mean|&tau; &middot; q&#775;|    // energy
+  &minus; 0.5 &middot; (roll&sup2; + pitch&sup2;)    // upright
+  &minus; 0.2 &middot; &Sigma; max(|q_i|&minus;0.5, 0)&sup2; // joint limits
+  &minus; 0.5 &middot; max(&minus;z&#775;, 0)            // anti-drop
+  &minus;100   on fall                  // terminal</pre>
+
+    <h3>Algorithms</h3>
+    <p>
+      We use the <a href="https://stable-baselines3.readthedocs.io/">Stable-Baselines3</a>
+      implementations of SAC and PPO with a shared [256, 256] MLP for actor and critic,
+      &gamma; = 0.99, and Adam at 3&times;10<sup>&minus;4</sup>. SAC has a 1M-transition
+      replay buffer, batch size 256, &tau; = 0.005, and auto-tuned entropy with target
+      entropy &minus;5. PPO uses 2,048 rollout steps, 10 SGD epochs, batch size 64, GAE
+      &lambda; = 0.95, clip range 0.2.
+    </p>
+  </section>
+
+  <section id="results">
+    <h2>Results</h2>
+
+    <h3>SAC: from standing to walking</h3>
+    <p>
+      The SAC policy spends ~300k steps learning to stand, transitions into a walking
+      phase between 1.0M and 2.0M steps, and plateaus around an episode return of 6,000.
+      The deterministic evaluation curve is smoother and reaches ~7,100, indicating most
+      training-curve variance comes from exploration noise.
+    </p>
+
+    <div class="grid">
+      <figure>
+        <img src="assets/01_learning_curve.png" alt="SAC training return">
+        <figcaption>Episode return over training (50-episode moving average).</figcaption>
+      </figure>
+      <figure>
+        <img src="assets/03_eval_performance.png" alt="Deterministic evaluation return">
+        <figcaption>Deterministic evaluation (mean over 5 episodes).</figcaption>
+      </figure>
+      <figure>
+        <img src="assets/02_episode_length.png" alt="Episode length over training">
+        <figcaption>Episode length &mdash; standing solved by ~1M steps.</figcaption>
+      </figure>
+      <figure>
+        <img src="assets/04_forward_velocity.png" alt="Forward walking speed over training">
+        <figcaption>Mean forward velocity per episode reaches ~1.6 m/s.</figcaption>
+      </figure>
+    </div>
+
+    <h3>Reward composition</h3>
+    <p>
+      Forward velocity dominates once standing is solved, with the alive bonus contributing
+      a constant ~32% of return and the energy penalty about 12% &mdash; just enough to
+      discourage the high-frequency leg-shimmy that smaller energy weights produced.
+    </p>
+
+    <div class="grid">
+      <figure>
+        <img src="assets/06_reward_components.png" alt="Per-step reward magnitudes">
+        <figcaption>Mean per-step magnitude of each reward term.</figcaption>
+      </figure>
+      <figure>
+        <img src="assets/07_component_pie.png" alt="Reward composition pie chart">
+        <figcaption>Reward composition over the last 200 episodes.</figcaption>
+      </figure>
+    </div>
+
+    <h3>PPO vs. SAC</h3>
+    <table>
+      <thead><tr><th></th><th>PPO</th><th>SAC</th></tr></thead>
+      <tbody>
+        <tr><td>On / off policy</td><td>on</td><td>off</td></tr>
+        <tr><td>Steps trained</td><td>~1.4M</td><td>~2.8M</td></tr>
+        <tr><td>Best eval return</td><td>~3,000</td><td>~7,100</td></tr>
+        <tr><td>Best fwd speed</td><td>~0.4 m/s</td><td>~1.6 m/s</td></tr>
+        <tr><td>Throughput</td><td>~300 sps</td><td>~50 sps</td></tr>
+      </tbody>
+    </table>
+    <p>
+      PPO never matched SAC on this task. It was much faster wall-clock per env step,
+      but two failure modes dominated: <em>reward hacking</em> the survival term (the
+      policy converges to a stationary T-pose that collects the alive bonus for 1,000
+      steps) and lateral drift when the reward did not penalize sideways motion.
+    </p>
+  </section>
+
+  <section id="limitations">
+    <h2>Limitations</h2>
+    <ul>
+      <li><strong>Catastrophic forgetting.</strong> Long SAC runs are not monotonic;
+        the policy occasionally collapses for a few episodes before the entropy
+        controller pushes exploration back up.</li>
+      <li><strong>Unconventional gait.</strong> The policy converges to a knees-bent,
+        ankle-pushing duck-walk &mdash; a legitimate local optimum of the reward, but
+        not human-like. A periodic phase reward or motion-capture imitation term would
+        likely fix this.</li>
+      <li><strong>Locked arms.</strong> Holding the arms at zero simplified training
+        but removed a useful balance DoF.</li>
+      <li><strong>No hardware deployment.</strong> All numbers are simulation-only.
+        Domain randomization is the natural next step.</li>
+    </ul>
+  </section>
+
+  <section id="video">
+    <h2>Video</h2>
+    <p>
+      <em>(Optional video deliverable.)</em> Embed link will go here once recorded.
+      The animated GIF at the top of the page shows the final SAC gait.
+    </p>
+    <!-- Replace with:
+    <div class="video-wrap">
+      <iframe src="https://www.youtube.com/embed/<TODO_VIDEO_ID>" allowfullscreen></iframe>
+    </div>
+    -->
+  </section>
+
+  <section id="cite">
+    <h2>Citation</h2>
+    <pre>@misc{burcher2026t1walk,
+  title  = {Bipedal Robotic Locomotion with Reinforcement Learning},
+  author = {Burcher, Drew and Torri, Dan and Wyatt, Nathan},
+  year   = {2026},
+  note   = {CS 5824 / ECE 5424 final project, Virginia Tech},
+  url    = {https://github.com/DrewBurcher/ML_Humaniod}
+}</pre>
+  </section>
+
+</main>
+
+<footer>
+  <div class="container">
+    <p>&copy; 2026 Drew Burcher, Dan Torri, Nathan Wyatt. Built with plain HTML &amp; CSS, hosted on GitHub Pages.</p>
+  </div>
+</footer>
+
+</body>
+</html>
