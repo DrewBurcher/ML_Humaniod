@@ -162,55 +162,48 @@
     </div>
 
 
-    <h3>PPO: Reward shaping for early gait formation</h3>
+    <h3>PPO: reward shaping for early gait formation</h3>
 <p>
-  PPO did not converge to a sustained forward gait within the project timeline,
-  but it showed clear behavioral improvement across reward iterations. Early PPO
-  policies often learned to survive by standing upright or shuffling in place,
-  which produced high episode length without meaningful locomotion. Later reward
-  variants reduced those survival-only exploits and encouraged more directional
-  motion, but often introduced new failure modes such as sideways drift, reverse
-  crab-walking, or forward falls.
+  PPO did not converge to a sustained walking gait, but it showed clear behavioral
+  progress across reward iterations. Early policies learned to survive by standing
+  upright or making only small shuffle attempts, which produced longer episodes
+  without meaningful locomotion. Later reward variants reduced these stationary
+  solutions and encouraged more directional motion, but also exposed new failure
+  modes such as sideways drift, reverse-motion survival, and forward falls.
 </p>
 <p>
-  Over repeated PPO experiments, the learned behavior progressed from standing
-  and small shuffle attempts, to low-body reverse-motion survival strategies, and
-  finally to the beginning of a true stepping pattern. Our strongest PPO locomotion
-  result showed the robot initiating a forward step with visible knee bend and a
-  partial follow-up step before losing balance. While this did not become a fully
-  sustained gait, it demonstrated that reward tuning moved PPO in the correct
-  direction and that the remaining challenge was no longer "can the robot move,"
-  but rather "can the reward support stable repeated stepping over long training
-  horizons."
-</p>
-<p>
-  The main PPO lesson from this project was that reward design mattered as much
-  as the algorithm itself. A reward that was too generous on survival produced
-  stable but mostly stationary behavior, while stronger posture and directional
-  penalties could over-constrain learning and suppress locomotion. The final PPO
-  results suggest that more time would likely be spent refining the balance between
-  forward progress, posture, torso alignment, and eventually ankle or foot-related
-  reward terms to support push-off and step placement.
+  The strongest PPO result showed the beginning of a true gait pattern: a visible
+  forward step with knee bend, followed by an attempted second step before the
+  robot lost balance. This result was still incomplete, but it demonstrated that
+  PPO reward tuning moved the policy in the right direction, from survival-focused
+  behavior toward early gait formation. Overall, PPO served as a useful baseline
+  for studying how reward design affected locomotion learning, even though SAC
+  ultimately achieved the stronger final gait.
 </p>
 
 <div class="grid">
   <figure>
-    <img src="assets/ppo_eval_len.png" alt="PPO evaluation episode length over training">
-    <figcaption>PPO evaluation episode length increased across several reward variants, showing improved balance and longer controlled motion.</figcaption>
+    <img src="assets/ppo_eval_mean_ep_length.png" alt="PPO evaluation episode length over training">
+    <figcaption>Evaluation episode length over training for PPO gait_v23, showing the improvement in balance and survival.</figcaption>
   </figure>
   <figure>
-    <img src="assets/ppo_eval_reward.png" alt="PPO evaluation reward over training">
-    <figcaption>PPO evaluation reward improved as reward shaping reduced stationary exploits and encouraged more gait-like motion.</figcaption>
+    <img src="assets/ppo_eval_mean_reward.png" alt="PPO evaluation reward over training">
+    <figcaption>Evaluation reward over training for PPO gait_v23, reflecting the effect of reward shaping on learned behavior.</figcaption>
   </figure>
   <figure>
-    <img src="assets/ppo_best_gait.gif" alt="Best PPO gait attempt">
-    <figcaption>Best PPO gait attempt: visible forward step initiation and knee bend before a loss of balance.</figcaption>
+    <img src="assets/ppo_rollout_ep_len_mean.png" alt="PPO rollout episode length over training">
+    <figcaption>Training rollout episode length, showing how PPO improved stability during learning.</figcaption>
   </figure>
   <figure>
-    <img src="assets/ppo_reward_components.png" alt="PPO reward component trends">
-    <figcaption>Reward-component trends helped diagnose whether PPO was being driven by survival, velocity, or penalties during training.</figcaption>
+    <img src="assets/ppo_eval_mean_distance.png" alt="PPO evaluation mean distance over training">
+    <figcaption>Evaluation mean forward distance over training, showing that later PPO policies covered more ground than early survival-only policies.</figcaption>
   </figure>
 </div>
+
+<figure>
+  <img src="assets/ppo_best_gait_v23.gif" alt="Best PPO gait_v23 forward motion attempt">
+  <figcaption>Best PPO forward-motion result (gait_v23): the policy begins a forward stepping sequence before losing balance.</figcaption>
+</figure>
     
     <h3>PPO vs. SAC</h3>
     <table>
