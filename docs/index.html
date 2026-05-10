@@ -163,42 +163,42 @@
 
 
     <h3>PPO: reward shaping for early gait formation</h3>
-<p>
-  PPO did not converge to a fully sustained walking gait, but it showed clear
-  behavioral progress across reward iterations. Early policies learned to stand,
-  survive, or make only small shuffle attempts, producing longer episodes without
-  meaningful locomotion. Later reward variants reduced these stationary solutions
-  and exposed more directional behaviors, including sideways drift, reverse-motion
-  survival, and eventually the beginning of forward stepping.
-</p>
-<p>
-  Our strongest PPO result showed the start of a true gait pattern: a visible
-  forward step with knee bend, followed by an attempted follow-up step before the
-  robot lost balance. The best PPO checkpoint reached about <strong>1.15 m</strong>
-  mean forward distance over a 1000-step evaluation, corresponding to an average
-  forward speed of about <strong>0.07 m/s</strong>. PPO ultimately served as a useful
-  baseline for understanding how reward design shaped locomotion behavior, even
-  though SAC achieved the stronger final gait.
-</p>
-
-<div class="grid">
-  <figure>
-    <img src="assets/mean_ep_len.png" alt="PPO evaluation episode length over training">
-    <figcaption>Evaluation episode length over training for PPO, showing improved balance and longer controlled motion in the stronger runs.</figcaption>
-  </figure>
-  <figure>
-    <img src="assets/mean_reward.png" alt="PPO evaluation reward over training">
-    <figcaption>Evaluation reward over training for PPO, reflecting the effect of reward shaping on learned behavior.</figcaption>
-  </figure>
-  <figure>
-    <img src="assets/ep_len_mean.png" alt="PPO rollout episode length over training">
-    <figcaption>Training rollout episode length, showing how PPO improved stability during learning before plateauing or degrading in later reward variants.</figcaption>
-  </figure>
-  <figure>
-    <img src="assets/ppo_gait.gif" alt="Best PPO gait attempt">
-    <figcaption>Best PPO forward-motion attempt: the policy begins a forward stepping sequence before losing balance. Best-checkpoint average speed was about 0.07 m/s.</figcaption>
-  </figure>
-</div>
+  <p>
+    PPO did not converge to a fully sustained walking gait, but it showed clear
+    behavioral progress across reward iterations. Early policies learned to stand,
+    survive, or make only small shuffle attempts, producing longer episodes without
+    meaningful locomotion. Later reward variants reduced these stationary solutions
+    and exposed more directional behaviors, including sideways drift, reverse-motion
+    survival, and eventually the beginning of forward stepping.
+  </p>
+  <p>
+    Our strongest PPO result showed the start of a true gait pattern: a visible
+    forward step with knee bend, followed by an attempted follow-up step before the
+    robot lost balance. The best PPO checkpoint reached about <strong>1.15 m</strong>
+    mean forward distance over a 1000-step evaluation, corresponding to an average
+    forward speed of about <strong>0.07 m/s</strong>. PPO ultimately served as a useful
+    baseline for understanding how reward design shaped locomotion behavior, even
+    though SAC achieved the stronger final gait.
+  </p>
+  
+  <div class="grid">
+    <figure>
+      <img src="assets/mean_ep_len.png" alt="PPO evaluation episode length over training">
+      <figcaption>Evaluation episode length over training for PPO, showing improved balance and longer controlled motion in the stronger runs.</figcaption>
+    </figure>
+    <figure>
+      <img src="assets/mean_reward.png" alt="PPO evaluation reward over training">
+      <figcaption>Evaluation reward over training for PPO, reflecting the effect of reward shaping on learned behavior.</figcaption>
+    </figure>
+    <figure>
+      <img src="assets/ep_len_mean.png" alt="PPO rollout episode length over training">
+      <figcaption>Training rollout episode length, showing how PPO improved stability during learning before plateauing or degrading in later reward variants.</figcaption>
+    </figure>
+    <figure>
+      <img src="assets/ppo_gait.gif" alt="Best PPO gait attempt">
+      <figcaption>Best PPO forward-motion attempt: the policy begins a forward stepping sequence before losing balance. Best-checkpoint average speed was about 0.07 m/s.</figcaption>
+    </figure>
+  </div>
     
     <h3>PPO vs. SAC</h3>
     <table>
