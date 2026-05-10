@@ -283,8 +283,18 @@ class T1WalkingEnv(gym.Env):
         z_vel = state["base-linear-velocity"][2]
         z_vel_pen = w.get("z_velocity_penalty", 0) * max(-z_vel, 0.0)
 
+      # PPO added reward aids
+      #   left_hip_yaw = state["joint-position"][13]
+      #   right_hip_yaw = state["joint-position"][19]
+
+      #   hip_yaw_pen = w.get("hip_yaw_penalty", 0.0) * (
+      #       left_hip_yaw**2 + right_hip_yaw**2)
+        
+      #   waist_yaw = state["joint-position"][10]
+      #   waist_yaw_pen = w.get("waist_yaw_penalty", 0.0) * (waist_yaw ** 2)
+
         total_reward = (vel_reward + survival + energy_pen + orientation_pen
-                        + limit_pen + z_vel_pen)
+                        + limit_pen + z_vel_pen) #lateral_pen + hip_yaw_pen + waist_yaw_pen)
 
         reward_info = {
             "velocity_reward": vel_reward,
@@ -294,6 +304,9 @@ class T1WalkingEnv(gym.Env):
             "joint_limit_penalty": limit_pen,
             "z_velocity_penalty": z_vel_pen,
             "forward_vel": forward_vel,
+            # "height_reward": height_reward,
+            # "hip_yaw_penalty": hip_yaw_pen,
+            # "waist_yaw_penalty": waist_yaw_pen,
         }
         return total_reward, reward_info
 
