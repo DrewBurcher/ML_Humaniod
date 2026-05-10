@@ -22,6 +22,22 @@ REWARD_WEIGHTS = {
     "z_velocity_penalty": -0.5,    # Penalty for downward z velocity: max(-z_dot, 0)
 }
 
+# PPO Final Reward Configuration
+# V23
+# REWARD_WEIGHTS = {
+#     "forward_velocity": 2.9,       # Linear reward on v_x
+#     "survival": 1.95,               # Bonus each timestep for staying alive
+#     "energy_penalty": -0.0029,    # Penalty per avg power
+#     "fall_penalty": -110.0,        # Large penalty for falling
+#     "orientation_penalty": -0.80,  # Penalty for torso tilt
+#     "joint_limit_penalty": -0.262,   # Penalty near joint limits
+#     "z_velocity_penalty": -1.6,    # Penalty for downward z velocity
+#     "height_reward": 1.15,          # Reward for maintaining height
+#     "lateral_velocity_penalty": -1.3,  # Penalty for lateral velocity
+#     "hip_yaw_penalty": -0.55,        # Penalty for hip yaw motion (encourage straight walking)
+#     "waist_yaw_penalty": -0.45,      # Penalty for waist yaw motion (encourage straight walking)
+# }
+
 # ── PPO hyperparameters ──────────────────────────────────────────────────────
 PPO_CONFIG = {
     "learning_rate": 3e-4,
