@@ -164,21 +164,19 @@
 
     <h3>PPO: reward shaping for early gait formation</h3>
   <p>
-    PPO did not converge to a fully sustained walking gait, but it showed clear
-    behavioral progress across reward iterations. Early policies learned to stand,
+    PPO did not converge to a fully sustained walking technique, but it showed clear
+    behavioral progress across reward variations. Early policies learned to stand,
     survive, or make only small shuffle attempts, producing longer episodes without
-    meaningful locomotion. Later reward variants reduced these stationary solutions
+    meaningful gait. Later reward variants reduced these stationary solutions
     and exposed more directional behaviors, including sideways drift, reverse-motion
     survival, and eventually the beginning of forward stepping.
   </p>
   <p>
-    Our strongest PPO result showed the start of a true gait pattern: a visible
-    forward step with knee bend, followed by an attempted follow-up step before the
-    robot lost balance. The best PPO checkpoint reached about <strong>1.15 m</strong>
+    Our strongest PPO result showed the start of a true gait pattern: a visible attempts
+    at ankle and knee motions in a forward manner. The best PPO checkpoint reached about 
+    <strong>1.15 m</strong>
     mean forward distance over a 1000-step evaluation, corresponding to an average
-    forward speed of about <strong>0.07 m/s</strong>. PPO ultimately served as a useful
-    baseline for understanding how reward design shaped locomotion behavior, even
-    though SAC achieved the stronger final gait.
+    forward speed of about <strong>0.07 m/s</strong>.
   </p>
   
   <div class="grid">
