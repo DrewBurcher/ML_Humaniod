@@ -161,23 +161,66 @@
       </figure>
     </div>
 
+
+    <h3>PPO: reward shaping for early gait formation</h3>
+  <p>
+    PPO did not converge to a fully sustained walking technique, but it showed clear
+    behavioral progress across reward variations. Early policies learned to stand,
+    survive, or make only small shuffle attempts, producing longer episodes without
+    meaningful gait. Later reward variants reduced these stationary solutions
+    and exposed more directional behaviors, including sideways drift, reverse-motion
+    survival, and eventually the beginning of forward stepping.
+  </p>
+  <p>
+    Our strongest PPO result showed the start of a true gait pattern: a visible attempts
+    at ankle and knee motions in a forward manner. The best PPO checkpoint reached about 
+    <strong>1.15 m</strong>
+    mean forward distance over a 1000-step evaluation, corresponding to an average
+    forward speed of about <strong>0.07 m/s</strong>.
+  </p>
+  
+  <div class="grid">
+      <figure>
+        <h4>Evaluation Episode Length</h4>
+        <img src="assets/mean_ep_length.png" alt="Learning Curve - Episode Return">
+        <figcaption>Evaluation episode length over training for PPO, showing improved balance and longer controlled motion in the stronger runs.</figcaption>
+      </figure>
+      <figure>
+        <h4>Evaluation Reward</h4>
+        <img src="assets/mean_reward.png" alt="Deterministic Performance: Reward over training">
+        <figcaption>Evaluation reward over training for PPO, reflecting the effect of reward shaping on learned behavior.</figcaption>
+      </figure>
+      <figure>
+        <h4>Rollout Episode Length</h4>
+        <img src="assets/ep_len_mean.png" alt="Episode length over training">
+        <figcaption>Training rollout episode length, showing how PPO improved stability during learning before plateauing or degrading in later reward variants.</figcaption>
+      </figure>
+      <figure>
+        <h4>Best PPO Gait Attempt</h4>
+        <img src="assets/ppo_gait.gif" alt="Best PPO gait attempt">
+        <figcaption>Best PPO forward-motion attempt: the policy begins a forward stepping sequence before losing balance. Best-checkpoint average speed was about 0.07 m/s.</figcaption>
+      </figure>
+    </div>
+    
     <h3>PPO vs. SAC</h3>
     <table>
       <thead><tr><th></th><th>PPO</th><th>SAC</th></tr></thead>
       <tbody>
         <tr><td>On / off policy</td><td>on</td><td>off</td></tr>
-        <tr><td>Steps trained</td><td>~1.4M</td><td>~2.8M</td></tr>
-        <tr><td>Best eval return</td><td>~3,000</td><td>~7,100</td></tr>
-        <tr><td>Best fwd speed</td><td>~0.4 m/s</td><td>~1.6 m/s</td></tr>
+        <tr><td>Steps trained</td><td>~2.4M</td><td>~2.8M</td></tr>
+        <tr><td>Best eval return</td><td>~1,000</td><td>~7,100</td></tr>
+        <tr><td>Best fwd speed</td><td>~0.1 m/s</td><td>~1.6 m/s</td></tr>
         <tr><td>Throughput</td><td>~300 sps</td><td>~50 sps</td></tr>
       </tbody>
     </table>
-    <p>
-      PPO never matched SAC on this task. It was much faster wall-clock per env step,
-      but two failure modes dominated: <em>reward hacking</em> the survival term (the
-      policy converges to a stationary T-pose that collects the alive bonus for 1,000
-      steps) and lateral drift when the reward did not penalize sideways motion.
-    </p>
+<p>
+  PPO never matched SAC on this task. It was much faster in wall-clock throughput,
+  but its performance was highly sensitive to reward design. Across multiple reward
+  variants, PPO repeatedly found partial solutions such as standing, shuffling,
+  sideways drift, or reverse-motion survival before later runs began to show the
+  first signs of real stepping. SAC ultimately learned the stronger final gait,
+  while PPO exposed how reward shaping influenced model behavior.
+</p>
   </section>
 
   <section id="limitations">
