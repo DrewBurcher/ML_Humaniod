@@ -21,4 +21,4 @@ Static site for the **Bipedal Robotic Locomotion with Reinforcement Learning** c
 - [ ] Add `paper.pdf` (compile `Report/main.tex` and copy here).
 - [ ] Add `slides.pdf` (export the Google Slides deck).
 - [ ] Update author email links (currently `href="#"`) once you decide whether to expose them.
-- [ ] (Optional) Replace the video placeholder section with a YouTube embed.
+
