@@ -38,36 +38,42 @@
   <section id="abstract">
     <h2>Abstract</h2>
     <p>
-      We train a 13-degree-of-freedom bipedal humanoid (Booster Robotics T1) to walk
-      forward in a PyBullet simulation using two model-free reinforcement-learning
+      We train a 13 degree of freedom bipedal humanoid (Booster Robotics T1) to walk
+      forward in a PyBullet simulation using two model-free reinforcement learning
       algorithms: Soft Actor&ndash;Critic (SAC) and Proximal Policy Optimization (PPO).
-      The policy is a two-layer MLP that maps proprioceptive observations to per-joint
-      position targets, and a hand-shaped reward combines forward velocity, an alive
-      bonus, an energy cost, and several stability penalties.
+      The policy is a two-layer MLP that maps joint angle and velocity observations to
+      joint position targets. A reward function was engineered through many trials to
+      combine forward velocity, an alive bonus, an energy cost, and several stability
+      penalties.
     </p>
     <p>
       After roughly 2.8M environment steps the SAC policy reaches a mean evaluation
-      return of about 7,100 and a forward speed of ~1.6 m/s. PPO under several reward
-      variants plateaus near a return of 3,000 and never produces a sustained gait.
-      We discuss the reward-shaping decisions that drove these results, the
-      catastrophic-forgetting failures we saw with SAC late in training, and the
-      practical trade-offs between on- and off-policy methods on a dense-reward
-      locomotion task.
+      return of about 7,100 and a forward speed of ~1.6 m/s, while PPO under several
+      reward variants plateaus near a return of 3,000 and never produces a sustained gait.
+      We discuss the reward shaping decisions that drove these results, the catastrophic-forgetting
+      failures we saw with SAC late in training, and the practical trade offs between
+      on and off policy methods on a dense reward locomotion task.
     </p>
   </section>
 
   <section id="problem">
     <h2>Problem</h2>
     <p>
-      Bipedal walking is high-dimensional, underactuated, and unstable in its
-      natural rest state &mdash; small mistakes early in a step cascade into a fall.
-      Classical zero-moment-point and model-predictive controllers work well when
-      the dynamics model is accurate, but they require significant tuning and do not
-      generalize easily. We study whether two off-the-shelf deep-RL algorithms can
-      learn a stable forward gait from scratch on the T1 humanoid using only
-      proprioceptive state and a dense, hand-shaped reward, and we compare them on
-      sample efficiency, wall-clock training time, final performance, and stability
-      of the learned policy.
+      Getting a bipedal robot to walk is a classic test bed for control and
+      reinforcement learning because the system is high-dimensional,
+      underactuated, and unstable in its natural rest state. Small mistakes
+      early in an episode quickly result in a fall. Classical controllers exist
+      for this problem (zero moment point trackers, model predictive control, quadratic
+      programming whole body controllers), but they all require fairly accurate
+      dynamics models and careful tuning, and the resulting gaits tend to not be
+      robust to varying conditions and environments.
+    </p>
+    <p>
+      Reinforcement learning gives the model more freedom and flexibility.
+      Instead of hard coding a controller, we specify what we want (move forward,
+      stay upright, save energy) and use gradient descent on a policy for behaviors
+      that maximize that reward. Modern actor&ndash;critic methods such as SAC and PPO
+      have made this practical.
     </p>
   </section>
 
@@ -75,22 +81,33 @@
     <h2>Method</h2>
     <h3>Robot &amp; simulator</h3>
     <p>
-      The Booster Robotics T1 is a 1.2 m, 23-joint humanoid loaded into PyBullet
-      via URDF. Physics runs at 240 Hz, the policy at 60 Hz. Head joints are locked
-      and arm joints are held at zero with a stiff position controller, leaving
-      <strong>13 actuated joints</strong> (waist + 6 per leg) under policy control.
-      Episodes terminate if the torso drops below 0.35 m, rises above 2 m, or
-      tilts more than ~70&deg;.
+      The Booster Robotics T1 is a ~1.2 m humanoid with 23 revolute
+      joints. We load its URDF in PyBullet and run physics at 240 Hz. The
+      two head joints are locked, and the eight arm joints are held at zero
+      by a stiff position controller, so the policy controls the remaining
+      13 joints (waist plus six per leg: hip pitch/roll/yaw, knee pitch, and
+      ankle pitch/roll). The policy runs at 60 Hz, so each policy step advances
+      four 240 Hz physics sub steps. Episodes last up to 1,000 policy steps (~16.7 s).
+      An episode terminates early if the torso drops below 0.35 m, rises above 2 m,
+      or tilts past ~70&deg; in roll or pitch.
     </p>
 
     <h3>Observation &amp; action</h3>
-    <ul>
-      <li><strong>Observation (36-D):</strong> torso height, Euler orientation,
-        linear and angular velocity, plus 13 joint positions and 13 joint velocities.</li>
-      <li><strong>Action (13-D):</strong> normalized joint targets in [&minus;1, 1],
-        applied via PD position control. Ankles use softer/more damped gains to
-        suppress foot-chatter.</li>
-    </ul>
+    <p>
+      The observation is a 36-dim float vector containing torso height,
+      torso orientation, torso linear and angular velocity, and the 13
+      actuated joint positions and velocities. We don't include global <em>x, y</em>
+      position so the policy works the same regardless of position.
+    </p>
+    <p>
+      The action <em>a</em> &isin; [&minus;1, 1]<sup>13</sup> is a normalized joint angle target.
+      We map it to each joint's URDF limits and apply position control with
+      PyBullet's POSITION_CONTROL mode with PD gains <em>K<sub>p</sub></em>=0.2,
+      <em>K<sub>d</sub></em>=0.5. The ankles use more damped gains
+      (<em>K<sub>p</sub></em>=0.1, <em>K<sub>d</sub></em>=1.0) because we
+      found that the robot was moving the ankles very quickly to move forward
+      which was more of a glitch in the physics engine than a viable gait.
+    </p>
 
     <h3>Reward</h3>
     <pre>r = 3.0 &middot; v_x                  // forward velocity
@@ -105,10 +122,13 @@
     <p>
       We use the <a href="https://stable-baselines3.readthedocs.io/">Stable-Baselines3</a>
       implementations of SAC and PPO with a shared [256, 256] MLP for actor and critic,
-      &gamma; = 0.99, and Adam at 3&times;10<sup>&minus;4</sup>. SAC has a 1M-transition
-      replay buffer, batch size 256, &tau; = 0.005, and auto-tuned entropy with target
-      entropy &minus;5. PPO uses 2,048 rollout steps, 10 SGD epochs, batch size 64, GAE
-      &lambda; = 0.95, clip range 0.2.
+      &gamma;=0.99 (discount rate for reward), and Adam at 3&times;10<sup>&minus;4</sup>
+      learning rate. SAC uses a 1 M-transition replay buffer, batch size 256, soft target
+      updates with &tau;=0.005, and auto-tuned entropy with target entropy &minus;5. PPO
+      uses 2,048 rollout steps, 10 SGD epochs, batch size 64, GAE &lambda;=0.95,
+      clip range 0.2, value coefficient 0.5, and entropy bonus 0.01. Both algorithms run
+      on CPU. For our network sizes and batch sizes this was about 2&times; faster than GPU
+      in our setup, mostly because the PyBullet step is the bottleneck and that runs on CPU.
     </p>
   </section>
 
@@ -117,10 +137,11 @@
 
     <h3>SAC: from standing to walking</h3>
     <p>
-      The SAC policy spends ~300k steps learning to stand, transitions into a walking
-      phase between 1.0M and 2.0M steps, and plateaus around an episode return of 6,000.
-      The deterministic evaluation curve is smoother and reaches ~7,100, indicating most
-      training-curve variance comes from exploration noise.
+      The policy spends roughly 300 k steps just learning to stand, then transitions into
+      a clear walking phase between 1.0 M and 2.0 M steps, and finally plateaus around an
+      episode return of 6,000 with occasional collapses. By 2.8 M steps the policy walks at
+      ~1.6 m/s and travels ~26 m per 16.7 s episode—a brisk walking pace for a robot of
+      this scale.
     </p>
 
     <div class="grid">
@@ -144,9 +165,13 @@
 
     <h3>Reward composition</h3>
     <p>
-      Forward velocity dominates once standing is solved, with the alive bonus contributing
-      a constant ~32% of return and the energy penalty about 12% &mdash; just enough to
-      discourage the high-frequency leg-shimmy that smaller energy weights produced.
+      Forward velocity grows monotonically as the policy learns to walk, while the survival
+      bonus is by definition constant once the episode runs to the truncation step—together
+      they account for ~82% of the reward at the end of training. The energy penalty is a
+      substantial 12% of the final reward. We tried smaller energy weights and the policy
+      converged to a behavior that &quot;shimmered&quot; the legs at high frequency: it scored well on
+      forward velocity but used roughly twice the torque per meter. The current weight
+      balances those terms reasonably well.
     </p>
 
     <div class="grid">
@@ -163,19 +188,22 @@
 
     <h3>PPO: reward shaping for early gait formation</h3>
   <p>
-    PPO did not converge to a fully sustained walking technique, but it showed clear
-    behavioral progress across reward variations. Early policies learned to stand,
-    survive, or make only small shuffle attempts, producing longer episodes without
-    meaningful gait. Later reward variants reduced these stationary solutions
-    and exposed more directional behaviors, including sideways drift, reverse-motion
-    survival, and eventually the beginning of forward stepping.
+    PPO did not converge to a fully sustained forward gait within the project timeline,
+    but it showed clear behavioral progress across reward iterations. Early PPO policies
+    commonly learned survival-focused strategies: standing upright, remaining mostly
+    stationary, or making only small shuffle attempts. As reward variants were
+    introduced to reduce those stationary solutions, PPO began to expose more directional
+    but still imperfect behaviors, including sideways drift, reverse-motion &quot;crab walk&quot;
+    survival, and forward-fall attempts.
   </p>
   <p>
-    Our strongest PPO result showed the start of a true gait pattern: a visible attempts
-    at ankle and knee motions in a forward manner. The best PPO checkpoint reached about 
-    <strong>1.15 m</strong>
-    mean forward distance over a 1000-step evaluation, corresponding to an average
-    forward speed of about <strong>0.07 m/s</strong>.
+    Our strongest PPO result showed the beginning of a true stepping pattern: the robot
+    initiated a visible forward step with knee bend and attempted a follow-up step before
+    losing balance. This was not yet a sustained gait, but it was an improvement over earlier
+    PPO behaviors and demonstrated that reward tuning moved the learned policy in the correct
+    direction. The best PPO checkpoint achieved approximately 1.15 m of forward distance
+    over a 1,000-step evaluation episode, corresponding to an average forward speed of
+    roughly 0.07 m/s.
   </p>
   
   <div class="grid">
@@ -201,41 +229,54 @@
       </figure>
     </div>
     
+    <h3>Conclusion</h3>
+    <p>
+      We trained a 13-DoF bipedal humanoid to walk in PyBullet using two standard
+      deep-RL algorithms and a hand-shaped reward. SAC produced a stable forward gait
+      at ~1.6 m/s after ~2.8 M environment steps; PPO under the same wall-clock budget
+      plateaued at less than half of SAC's return. The biggest practical lesson from
+      the project is how much of the work is in the reward function rather than the
+      algorithm: small changes to the survival bonus or the energy weight produced very
+      different gaits, and most of the time we spent debugging was actually time spent
+      diagnosing reward hacks.
+    </p>
+    
     <h3>PPO vs. SAC</h3>
     <table>
       <thead><tr><th></th><th>PPO</th><th>SAC</th></tr></thead>
       <tbody>
         <tr><td>On / off policy</td><td>on</td><td>off</td></tr>
-        <tr><td>Steps trained</td><td>~2.4M</td><td>~2.8M</td></tr>
-        <tr><td>Best eval return</td><td>~1,000</td><td>~7,100</td></tr>
-        <tr><td>Best fwd speed</td><td>~0.1 m/s</td><td>~1.6 m/s</td></tr>
+        <tr><td>Replay buffer</td><td>&ndash;</td><td>1 M</td></tr>
+        <tr><td>Steps trained</td><td>~1.4 M</td><td>~2.8 M</td></tr>
+        <tr><td>Best eval return</td><td>~3,000</td><td>~7,100</td></tr>
+        <tr><td>Best fwd speed</td><td>~0.4 m/s</td><td>~1.6 m/s</td></tr>
         <tr><td>Throughput</td><td>~300 sps</td><td>~50 sps</td></tr>
       </tbody>
     </table>
-<p>
-  PPO never matched SAC on this task. It was much faster in wall-clock throughput,
-  but its performance was highly sensitive to reward design. Across multiple reward
-  variants, PPO repeatedly found partial solutions such as standing, shuffling,
-  sideways drift, or reverse-motion survival before later runs began to show the
-  first signs of real stepping. SAC ultimately learned the stronger final gait,
-  while PPO exposed how reward shaping influenced model behavior.
-</p>
   </section>
 
   <section id="limitations">
     <h2>Limitations</h2>
     <ul>
-      <li><strong>Catastrophic forgetting.</strong> Long SAC runs are not monotonic;
-        the policy occasionally collapses for a few episodes before the entropy
-        controller pushes exploration back up.</li>
-      <li><strong>Unconventional gait.</strong> The policy converges to a knees-bent,
-        ankle-pushing duck-walk &mdash; a legitimate local optimum of the reward, but
-        not human-like. A periodic phase reward or motion-capture imitation term would
-        likely fix this.</li>
-      <li><strong>Locked arms.</strong> Holding the arms at zero simplified training
-        but removed a useful balance DoF.</li>
-      <li><strong>No hardware deployment.</strong> All numbers are simulation-only.
-        Domain randomization is the natural next step.</li>
+      <li><strong>Catastrophic forgetting.</strong> Long SAC runs are not monotonic.
+        After the robot has been walking reliably for hundreds of thousands of steps,
+        it can abruptly lose its balance for a few episodes and collapse the return
+        curve to nearly zero before recovering. We suspect the cause is the replay
+        buffer slowly ageing out the &quot;early-fall&quot; transitions.</li>
+      <li><strong>Unconventional gaits.</strong> The robot did not converge to a clean
+        human-style heel-toe gait. The final policy uses what looks more like a duck
+        walk: knees stay bent, ankles push off in a short hop, and the torso leans
+        slightly forward. This is a legitimate local optimum of the reward—it scores
+        well on velocity, survival, and energy. Without a periodic phase reward or a
+        motion-capture imitation term, there is no signal encouraging a particular
+        limb-coordination pattern.</li>
+      <li><strong>Locked arms.</strong> Holding the arms at zero simplifies training but
+        also removes a useful degree of freedom for balance. Re-running with the full
+        21-joint action space is straightforward but would significantly change the
+        credit-assignment problem.</li>
+      <li><strong>Sim-to-real gap.</strong> We never deploy on the physical T1, so all
+        numbers are simulation-only. Domain randomization (motor friction, link mass,
+        latency) would be a natural next step before any hardware test.</li>
     </ul>
   </section>
 
@@ -247,7 +288,9 @@
   year   = {2026},
   note   = {CS 4824 / ECE 4424 final project, Virginia Tech},
   url    = {https://github.com/DrewBurcher/ML_Humaniod}
-}</pre>
+}
+
+For a complete treatment, see <a href="paper.pdf">the full technical report</a>.</pre>
   </section>
 
 </main>
